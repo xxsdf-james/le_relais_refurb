@@ -1,0 +1,22 @@
+loop0   loop        0 1
+loop1   loop        0 1
+loop2   loop        0 1
+loop3   loop        0 0
+loop4   loop        0 0
+loop5   loop        0 0
+loop6   loop        0 0
+loop7   loop        0 0
+loop8   loop        0 0
+loop9   loop        0 0
+loop10  loop        0 0
+loop11  loop        0 0
+loop12  loop        0 0
+loop13  loop        0 0
+loop14  loop        0 0
+loop15  loop        0 0
+loop16  loop        0 0
+loop17  loop        0 0
+sda     disk usb    1 1
+sr0     rom  sata   1 0
+nvme0n1 disk nvme   0 0
+

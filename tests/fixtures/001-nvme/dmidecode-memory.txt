@@ -1,0 +1,79 @@
+# dmidecode 3.6
+Getting SMBIOS data from sysfs.
+SMBIOS 3.0.0 present.
+
+Handle 0x003E, DMI type 16, 23 bytes
+Physical Memory Array
+	Location: System Board Or Motherboard
+	Use: System Memory
+	Error Correction Type: None
+	Maximum Capacity: 64 GB
+	Error Information Handle: Not Provided
+	Number Of Devices: 4
+
+Handle 0x003F, DMI type 17, 40 bytes
+Memory Device
+	Array Handle: 0x003E
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: Unknown
+	Set: None
+	Locator: ChannelA-DIMM0
+	Bank Locator: BANK 0
+	Type: Unknown
+	Type Detail: None
+
+Handle 0x0040, DMI type 17, 40 bytes
+Memory Device
+	Array Handle: 0x003E
+	Error Information Handle: Not Provided
+	Total Width: 64 bits
+	Data Width: 64 bits
+	Size: 8 GB
+	Form Factor: DIMM
+	Set: None
+	Locator: ChannelA-DIMM1
+	Bank Locator: BANK 1
+	Type: DDR4
+	Type Detail: Synchronous Unbuffered (Unregistered)
+	Speed: 2400 MT/s
+	Manufacturer: Samsung
+	Serial Number: 225B1BE7
+	Asset Tag: 9876543210
+	Part Number: M378A1K43CB2-CRC    
+	Rank: 1
+	Configured Memory Speed: 2400 MT/s
+	Minimum Voltage: 1.2 V
+	Maximum Voltage: 1.2 V
+	Configured Voltage: 1.2 V
+
+Handle 0x0041, DMI type 17, 40 bytes
+Memory Device
+	Array Handle: 0x003E
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: Unknown
+	Set: None
+	Locator: ChannelB-DIMM0
+	Bank Locator: BANK 2
+	Type: Unknown
+	Type Detail: None
+
+Handle 0x0042, DMI type 17, 40 bytes
+Memory Device
+	Array Handle: 0x003E
+	Error Information Handle: Not Provided
+	Total Width: Unknown
+	Data Width: Unknown
+	Size: No Module Installed
+	Form Factor: Unknown
+	Set: None
+	Locator: ChannelB-DIMM1
+	Bank Locator: BANK 3
+	Type: Unknown
+	Type Detail: None
+
