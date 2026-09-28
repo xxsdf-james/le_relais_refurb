@@ -38,9 +38,10 @@
 #     accordingly (no longer used). summary.csv's "partitioned" status value
 #     is kept as-is for continuity but now means "sanitized + confirmed
 #     clean partition table," not "ESP created."
-#   - NOT YET VERIFIED on real hardware — test on a real machine before
-#     trusting this across the batch. If the dual-boot/Mint phase resumes
-#     later (CLAUDE.md, "comes later"), pull the pre-created-shared-ESP
+#   - CONFIRMED on real hardware 2026-09-28 (001/CIAD7562, NVMe Clear-tier
+#     fallback path): zap succeeded, partition_status=ok, summary.csv row
+#     updated correctly. If the dual-boot/Mint phase resumes later
+#     (CLAUDE.md, "comes later"), pull the pre-created-shared-ESP
 #     version back from git history rather than re-deriving it.
 #   - RESULTS_DIR fixed from "$SCRIPT_DIR/../results" to "$SCRIPT_DIR/results"
 #     — same Toolbox-USB-layout bug as diagnostics.sh v0.7 (see its
