@@ -20,6 +20,34 @@
 #   5. Writes a per-machine erasure report and appends a stage=erase row to
 #      the same results/summary.csv that diagnostics.sh writes to.
 #
+# v9 changes (SATA-SSD branch: prefer Enhanced Secure Erase; frozen-state fix
+# corrected; provisional marker removed):
+#   - First real-hardware confirmation of this branch, 2026-09-28 (002/SATA
+#     SSD): exit=0, readback-sample verify=pass, partition=ok. Previously
+#     marked "provisional, not yet confirmed" — see known-issues.md.
+#   - Drive reported security state FROZEN on the first attempt. The die()
+#     message below used to suggest a full power-off/power-on cycle; that is
+#     unreliable because most BIOSes reissue SECURITY FREEZE LOCK on every
+#     POST, refreezing the drive. Confirmed fix: suspend the machine to RAM
+#     (S3) and resume — this forces a SATA link reset (COMRESET) via the
+#     kernel without going through BIOS POST, so the freeze-lock command is
+#     never reissued. Message updated accordingly.
+#   - Now prefers `hdparm --security-erase-enhanced` over plain
+#     `--security-erase` whenever `hdparm -I` reports enhanced-erase support,
+#     recording which variant actually ran in erase_method (same pattern as
+#     the NVMe crypto-erase/user-data-erase distinction above). Enhanced is a
+#     strict superset by ATA spec (covers reallocated/spare sectors the plain
+#     variant doesn't guarantee) at no measured cost — both completed in the
+#     same ~30s ballpark on the confirmed drive, consistent with SSD firmware
+#     typically implementing both via the same internal key-discard/
+#     block-erase mechanism rather than a literal sector-by-sector overwrite.
+#   - This is NOT a NIST-certified Purge-tier claim — see methodology.md §4.3
+#     for why (NIST SP 800-88 Rev. 1 was withdrawn 2025-09-26 and superseded
+#     by Rev. 2, which removed the per-command Clear/Purge table this project
+#     used to cite and now defers to the paid IEEE 2883 standard instead).
+#     §4.3 documents this as a reasoned judgment call, same treatment as
+#     §4.1's NVMe Clear-tier fallback exception.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -670,19 +698,22 @@ case "$STORAGE_TYPE" in
     ;;
  
   "SATA SSD (non-rotational)")
-    log "NOTE: SATA-SSD secure-erase path — provisional, not yet confirmed in methodology.md §4 (see toolkit-reference.md TODO)."
+    log "NOTE: SATA-SSD secure-erase path — confirmed on real hardware 2026-09-28 (002). Tier classification is a documented judgment call, not a NIST-certified Purge result — see methodology.md §4.3."
     FROZEN_CHECK=$(sudo hdparm -I "$PRIMARY_DEV" 2>&1)
     log "\n-- hdparm -I security state --"
     echo "$FROZEN_CHECK" | tee -a "$OUT" >/dev/null
-    if echo "$FROZEN_CHECK" | grep -qi "^\s*frozen$" || echo "$FROZEN_CHECK" | grep -qi "not.*supported.*frozen" ; then
-      : # ambiguous phrasing across vendors — fall through to explicit check below
-    fi
     if echo "$FROZEN_CHECK" | grep -Eqi "^\s*frozen\b" ; then
-      die "Drive reports security state FROZEN — hdparm secure erase will fail. This is a known BIOS/ATA behavior (security features locked after resume/boot). Try a full power-off/power-on cycle (not a Live-session restart) before re-running. Nothing was erased."
+      die "Drive reports security state FROZEN — hdparm secure erase will fail. This is a known BIOS/ATA behavior (BIOS reissues SECURITY FREEZE LOCK on every POST). Confirmed fix (002, 2026-09-28): suspend the machine to RAM (S3) and resume — this forces a SATA link reset without going through BIOS POST, so the freeze-lock command is never reissued. A full power-off/power-on cycle is NOT reliable by itself, since it goes through POST again and typically refreezes the drive. Nothing was erased."
     fi
-    ERASE_METHOD="hdparm secure-erase"
+    if echo "$FROZEN_CHECK" | grep -qi "supported: enhanced erase"; then
+      ERASE_METHOD="hdparm security-erase-enhanced"
+      ERASE_FLAG="--security-erase-enhanced"
+    else
+      ERASE_METHOD="hdparm security-erase (enhanced not supported by this drive)"
+      ERASE_FLAG="--security-erase"
+    fi
     run_logged "hdparm_set_pass" sudo hdparm --user-master u --security-set-pass p1 "$PRIMARY_DEV"
-    run_logged "hdparm_secure_erase" sudo hdparm --user-master u --security-erase p1 "$PRIMARY_DEV"
+    run_logged "hdparm_secure_erase" sudo hdparm --user-master u "$ERASE_FLAG" p1 "$PRIMARY_DEV"
     ERASE_EXIT=$?
     VERIFY_METHOD="readback-sample"
     ;;
