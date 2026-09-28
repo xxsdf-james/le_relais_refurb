@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Runs on the laptop, not a target machine — not part of the
 # raw.githubusercontent.com delivery path (CLAUDE.md, "Delivery to target
-# machines"). Pulls one machine's results/ (diag_*.txt + summary.csv) from
-# an Ubuntu Live session over SSH, per docs/ssh-access.md.
+# machines"). Pulls one machine's results/ (diag_*.txt + erase_*.txt +
+# summary.csv) from an Ubuntu Live session over SSH, per docs/ssh-access.md.
 #
 # Does NOT merge pulled summary.csv rows into a single master file across
 # machines/sessions — that merge strategy is still an open decision
@@ -73,10 +73,19 @@ if ! scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/diag_*.txt
   echo "No diag_*.txt matched (fine if this pull is erase-only, or that stage hasn't run yet)."
 fi
 
+# erase-partition.sh names its report erase_${MACHINE_ID}_${CIAD_NUMBER}.txt
+# — a different prefix from diagnostics.sh's diag_*.txt, so it needs its own
+# glob. (Bug fixed 2026-09-28: this script only ever fetched diag_*.txt,
+# so an erase-only pull silently came back with nothing — not an SSH or
+# results/ path problem, just a missing pattern here.)
+if ! scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/erase_*.txt" "$LOCAL_DEST/" 2>/dev/null; then
+  echo "No erase_*.txt matched (fine if this pull is diagnostics-only, or that stage hasn't run yet)."
+fi
+
 SUMMARY_DEST="$LOCAL_DEST/summary.csv.${TARGET_IP}"
 scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv" "$SUMMARY_DEST"
 
 echo ""
 echo "Done."
-echo "Logs        : $LOCAL_DEST"
+echo "Logs        : $LOCAL_DEST (diag_*.txt and/or erase_*.txt, whichever stages have run)"
 echo "Summary rows: $SUMMARY_DEST (per-source-IP, not merged into a master file)"
