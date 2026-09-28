@@ -25,8 +25,10 @@ Usage: pull-results.sh <target-ip|user@target-ip> <machine-label> [remote-user] 
                        the exact absolute path at the end of its run
                        ("Summary row in: ...") if this default doesn't match.
 
-Local destination: ${LE_RELAIS_RESULTS_DIR:-$HOME/le-relais-results}/<machine-label>/
-Never the repo — see CLAUDE.md, "Repo layout": real results don't go in git.
+Local destination: ${LE_RELAIS_RESULTS_DIR:-<repo's parent dir>/le_relais_refurb_results}/<machine-label>/
+Default is a sibling of this repo (created if it doesn't exist yet, used
+as-is if it does), never inside the repo itself — see CLAUDE.md, "Repo
+layout": real results don't go in git.
 USAGE
 }
 
@@ -47,8 +49,12 @@ MACHINE_LABEL="$2"
 REMOTE_USER="${3:-$REMOTE_USER}"
 REMOTE_RESULTS_DIR="${4:-results}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+DEFAULT_RESULTS_DIR="$(dirname "$REPO_ROOT")/le_relais_refurb_results"
+
 KEY="$HOME/.ssh/id_ed25519_refurb"
-LOCAL_BASE="${LE_RELAIS_RESULTS_DIR:-$HOME/le-relais-results}"
+LOCAL_BASE="${LE_RELAIS_RESULTS_DIR:-$DEFAULT_RESULTS_DIR}"
 LOCAL_DEST="$LOCAL_BASE/$MACHINE_LABEL"
 
 mkdir -p "$LOCAL_DEST"
