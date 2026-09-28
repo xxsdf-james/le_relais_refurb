@@ -65,14 +65,14 @@ download into a shell.
 
 ```
 # Linux live session
-wget -O diagnostics.sh https://raw.githubusercontent.com/<user>/<repo>/refs/tags/<tag>/scripts/linux/diagnostics.sh
+wget -O diagnostics.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/diagnostics.sh
 sha256sum diagnostics.sh      # compare with the printed card, then:
 sudo bash diagnostics.sh
 ```
 
 ```
 # Windows (built-in PowerShell 5.1)
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/<user>/<repo>/refs/tags/<tag>/scripts/windows/<file>.ps1 -OutFile <file>.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/<file>.ps1 -OutFile <file>.ps1
 Get-FileHash <file>.ps1 -Algorithm SHA256    # compare with the printed card
 powershell -ExecutionPolicy Bypass -File .\<file>.ps1
 ```
