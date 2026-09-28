@@ -51,6 +51,10 @@ investigate rather than deferring to the doc.
 - Push back directly on risky proposals, including Hamish's. Name the actual risk.
 - Ask when an ambiguity would change the answer: decisions here apply to ~100 machines.
 - Don't promote any doc to "final" unless Hamish says so.
+- **Any command that needs Hamish's own auth (git push/tag push, scp/ssh with his key,
+  `gh`, etc.): don't run it — present the exact command(s) for him to type himself.**
+  Confirmed 2026-09-28 after a `git push` attempt was denied. Commit/tag locally are fine;
+  the push itself, and anything else requiring his credentials, is his to run.
 
 ## Safety rules (hard)
 
@@ -87,7 +91,9 @@ Get-FileHash <file>.ps1 -Algorithm SHA256    # compare with the printed card
 powershell -ExecutionPolicy Bypass -File .\<file>.ps1
 ```
 
-Publishing: commit, tag, push, then print the new checksums. Only Hamish publishes.
+Publishing: commit and tag locally, present the `push` command(s) for Hamish to run himself
+(see "How to work" — auth-key commands are his to run), then print the new checksums. Only
+Hamish publishes.
 
 ## Out of scope / superseded
 
