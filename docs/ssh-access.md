@@ -102,3 +102,27 @@ identity, so the first connection to each machine always shows "the
 authenticity of host ... can't be established, continue connecting?" —
 EXPECTED every time, not an error. Safe to accept for this LAN-local,
 hands-on-the-machine workflow.
+
+## "REMOTE HOST IDENTIFICATION HAS CHANGED" on reconnect
+
+EXPECTED, not a MITM signal, for this workflow specifically. Cause: each
+`enable-ssh.sh` run installs `openssh-server` fresh into that live
+session; the package install generates a new host key on the spot, and
+the Live filesystem doesn't persist it. So a *different* live boot of the
+*same* machine — e.g. the opening-diagnostics boot vs. the
+closing-diagnostics boot later in `toolkit-reference.md`'s per-machine
+workflow — always presents a different host key at the same IP. DHCP
+handing that IP to a *different* bench machine between sessions triggers
+the identical warning. There's no host-key pinning in this design to
+check the new key against (the GitHub-published-key model above
+authenticates you to the target, not the target's identity to you) — the
+real trust boundary is physical: you're at the bench, you just watched
+`enable-ssh.sh` print that connect command.
+
+Fix — remove only the stale entry, then reconnect and accept the new key:
+```
+ssh-keygen -R <target-ip>
+```
+Don't disable `StrictHostKeyChecking` globally to work around this; it's
+still meaningful for anything outside this specific ephemeral-live-session
+case (e.g. non-LAN-local connections).
