@@ -55,8 +55,9 @@ this — it's kept for when that phase resumes.
 1. Boot Ubuntu USB → Ubuntu Live
 2. Fetch diagnostics.sh, verify its SHA-256, run it (`bash diagnostics.sh` — no sudo,
    it escalates per-command internally) → opening diagnostics: machine label + "before"
-3. If bench access or a results pull is needed now: fetch and run enable-ssh.sh
-   (`sudo bash enable-ssh.sh <github-username>`) — see docs/ssh-access.md
+3. Fetch and run enable-ssh.sh (`sudo bash enable-ssh.sh <github-username>`) — see
+   docs/ssh-access.md. Always done, not just for ad hoc bench access: results are pulled
+   and `summary.csv` updated over SSH on every machine in this batch.
 4. Fetch erase-partition.sh into the SAME directory as diagnostics.sh (both resolve
    results/ relative to themselves), verify its SHA-256, run it (`bash
    erase-partition.sh` — no sudo): sanitizes the drive (method by drive type,
@@ -72,7 +73,8 @@ this — it's kept for when that phase resumes.
 8. Periodically run check-update-status.ps1 (elevated) until it verdicts OK
 9. Verify Windows activation manually (Settings → System → Activation) — no script
    checks this yet
-10. If bench access or a results pull is needed: fetch and run enable-ssh.ps1
+10. Fetch and run enable-ssh.ps1 — same as step 3: always done, not conditional, for the
+    results pull and summary.csv update
 11. Boot Ubuntu USB → Ubuntu Live again, fetch diagnostics.sh again, run it for closing
     diagnostics (same machine label + "after")
 12. Pull that machine's result files (diagnostic .txt logs, summary.csv) over SSH — see

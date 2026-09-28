@@ -92,9 +92,11 @@ Publishing: commit, tag, push, then print the new checksums. Only Hamish publish
 
 ## Open items
 
-- Where diagnostic results go now that the Toolbox USB is gone (blocks the `diagnostics.sh` rewrite).
-  SSH (`docs/ssh-access.md`) is CONFIRMED working for ad hoc/troubleshooting transfer as of
-  2026-09-28; whether it becomes the standard mechanism for routine `diagnostics.sh` results
-  across all ~100 machines is still open — Hamish's call.
+- Where diagnostic results go now that the Toolbox USB is gone: RESOLVED for the current
+  36-machine Windows-only batch (Hamish, 2026-09-28) — SSH (`docs/ssh-access.md`) is the
+  routine mechanism for every machine, not just ad hoc/troubleshooting use, since results
+  are pulled and `summary.csv` updated over SSH on each machine. Whether this extends as
+  the standard mechanism beyond this batch (toward the full ~100 machines / future phases)
+  is still open.
 - How activation keys reach Windows machines without being in this repo.
 - Internal asset-labeling scheme: unresolved at Le Relais. Don't invent one.
