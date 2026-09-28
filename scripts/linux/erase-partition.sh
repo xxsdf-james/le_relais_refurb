@@ -725,7 +725,8 @@ elif [ "$ERASE_EXIT" -eq 0 ]; then
     # from remapped flash cells the controller no longer maps to those LBAs.
     # A "pass" here is the best available confirmation on hardware with no
     # Purge-tier path — it is not equivalent to the marker-file verification
-    # used for crypto erase. See refurb-diagnostics-methodology.md §3.
+    # used for crypto erase. See methodology.md §4.2 (docs/methodology.md,
+    # post-merge; was refurb-diagnostics-methodology.md §3 pre-merge).
     OFFSETS_PCT=(0 25 50 75 99)
     PASS_COUNT=0
     TOTAL_COUNT=${#OFFSETS_PCT[@]}
