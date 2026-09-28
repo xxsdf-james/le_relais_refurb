@@ -1,0 +1,20 @@
+smartctl 7.5 2025-04-30 r5714 [x86_64-linux-7.0.0-30-generic] (local build)
+Copyright (C) 2002-25, Bruce Allen, Christian Franke, www.smartmontools.org
+
+=== START OF INFORMATION SECTION ===
+Model Family:     Samsung based SSDs
+Device Model:     SAMSUNG MZ7TY256HDHP-000L7
+Serial Number:    S307NY0J331733
+LU WWN Device Id: 5 002538 d00000000
+Firmware Version: MAT04L6Q
+User Capacity:    256,060,514,304 bytes [256 GB]
+Sector Size:      512 bytes logical/physical
+Rotation Rate:    Solid State Device
+Form Factor:      2.5 inches
+TRIM Command:     Available
+Device is:        In smartctl database 7.5/5706
+ATA Version is:   ACS-2, ATA8-ACS T13/1699-D revision 4c
+SATA Version is:  SATA 3.1, 6.0 Gb/s (current: 6.0 Gb/s)
+Local Time is:    Mon Sep 28 09:48:39 2026 UTC
+SMART support is: Available - device has SMART capability.
+SMART support is: Enabled
