@@ -52,9 +52,8 @@ connect command at the end.
 From the laptop:
 ```
 ssh -i ~/.ssh/id_ed25519_refurb <user>@<target-ip>
-scp -O -i ~/.ssh/id_ed25519_refurb <file> <user>@<target-ip>:~/
+scp -i ~/.ssh/id_ed25519_refurb <file> <user>@<target-ip>:~/
 ```
-See the known issue below for why `scp` needs `-O`.
 
 No cleanup needed afterward — the live session is inherently ephemeral,
 and the drive gets wiped and reinstalled regardless.
@@ -76,28 +75,25 @@ server trusting a technician's personal key for admin access on someone's
 low-budget PC. Add this to the end-of-workflow checklist for the 36
 Windows-only machines; don't rely on remembering it ad hoc.
 
-## Known issue: `scp` fails with "subsystem request failed" — use `-O`
+## Resolved: `scp` "subsystem request failed" — missing `Subsystem sftp` line
 
 CONFIRMED 2026-09-28, on the Ubuntu Live image used for the 002-sata-ssd
 fixture capture: plain `scp` (which defaults to the SFTP protocol on
-modern OpenSSH clients) fails with `subsystem request failed on channel 0`
-/ `scp: Connection closed`, even after installing `openssh-sftp-server`.
-Root cause not fully isolated — installing the binary alone didn't fix
-it, so it's more likely a missing `Subsystem sftp ...` line in
-`/etc/ssh/sshd_config` on this image than a missing binary; not
-re-investigated further since the workaround is sufficient.
+modern OpenSSH clients) failed with `subsystem request failed on channel
+0` / `scp: Connection closed`. Root cause, confirmed 2026-09-28: this live
+image ships a pre-modified `/etc/ssh/sshd_config` that lacks a `Subsystem
+sftp ...` line; the `openssh-server` package's own default config has it.
+Installing the package over the pre-existing file triggers a dpkg
+conffile prompt ("Configuration file '/etc/ssh/sshd_config' ... modified
+since installation") — taking the package maintainer's version restores
+the `Subsystem sftp` line and fixes plain `scp`, no `-O` needed.
 
-**Workaround (sufficient for this workflow):** always pass `-O` to `scp`,
-which forces the older SCP protocol and bypasses the SFTP subsystem
-entirely:
-```
-scp -O -i ~/.ssh/id_ed25519_refurb <src> <user>@<ip>:<dst>
-```
-
-If this needs a real fix later (e.g. for `sftp`/GUI file-browser use), the
-next step would be checking `grep -n "^Subsystem" /etc/ssh/sshd_config` on
-the target and adding the line if absent, then `sudo systemctl restart
-ssh`.
+`enable-ssh.sh` now passes `--force-confnew` to `apt install`
+(`scripts/linux/enable-ssh.sh`) so this is applied automatically and the
+prompt no longer appears. If you hit "subsystem request failed" again
+(e.g. running an older copy of the script, or installing
+`openssh-server` by hand), either re-pull the script or answer the
+conffile prompt with the package maintainer's version, then retry `scp`.
 
 ## First-connection host key prompt
 

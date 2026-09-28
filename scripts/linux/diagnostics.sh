@@ -1,10 +1,34 @@
 #!/bin/bash
 # Diagnostics script — Le Relais PC Refurbishment
 #
-# Runs from the TOOLBOX USB (TOOLBOX/scripts/diagnostics.sh) under Ubuntu Live.
-# Assesses hardware condition, drive type, and dual-boot suitability. Does NOT
-# wipe a disk, install anything, or verify Windows activation — those stay
-# outside this script's scope (see comments below for why).
+# Fetched via raw.githubusercontent.com and run under Ubuntu Live (see
+# CLAUDE.md, "Delivery to target machines" — the Toolbox USB this comment
+# used to describe is retired, see CLAUDE.md "Out of scope / superseded").
+# Assesses hardware condition and drive type. Does NOT wipe a disk, install
+# anything, or verify Windows activation — those stay outside this script's
+# scope (see comments below for why).
+#
+# v0.7 changes (Windows-only batch — 36 machines, IT dept priority,
+# 2026-09-28, paired with erase-partition.sh v8):
+#   - Header comment and the end-of-run reminder updated for the retired
+#     Toolbox USB; end-of-run reminder now points at the SSH-based pull
+#     (docs/ssh-access.md) instead.
+#   - Dropped the Linux/GRUB half of the boot-entry check and the "Hardware
+#     Suitability Specs (for manual dual-boot/Windows-only/Mint-only
+#     decision)" recap block: for this batch that decision is already fixed
+#     (Windows-only), and the underlying specs (RAM, storage, UEFI) are
+#     already logged individually elsewhere in this script. Not a permanent
+#     removal — if the dual-boot/Mint phase resumes later (CLAUDE.md,
+#     "comes later"), pull this logic back from git history rather than
+#     re-deriving it.
+#   - RESULTS_DIR fixed from "$SCRIPT_DIR/../results" to "$SCRIPT_DIR/results":
+#     the old path assumed the Toolbox USB layout (scripts/diagnostics.sh
+#     next to a sibling results/ dir). Under the current flat wget-fetch
+#     delivery model (CLAUDE.md) there's no scripts/ parent, so "../results"
+#     resolved to whatever's above the current directory — wrong, and maybe
+#     unwritable. Not yet exercised on a real fetch-and-run (see the open
+#     "fetch test on a real target machine" item) — found by inspection,
+#     not a live failure.
 #
 # v0.6 changes from v0.5 (summary.csv redesign — one row per machine):
 #   - summary.csv is now keyed on machine_serial (chassis serial) with
@@ -79,14 +103,14 @@
 #     (stage=before/after) leave those six columns blank; only
 #     stage=erase rows populate them.
 #
-# Usage (from TOOLBOX/scripts/): ./diagnostics.sh
+# Usage: ./diagnostics.sh (results/ is created next to wherever this file lands)
  
 set -uo pipefail
 # Deliberately no -e: a single missing tool or offline apt call must not abort
 # the whole diagnostic run — we want partial results, not a hard stop.
  
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="$SCRIPT_DIR/../results"
+RESULTS_DIR="$SCRIPT_DIR/results"
 mkdir -p "$RESULTS_DIR"
  
 read -rp "Machine ID/label: " MACHINE_ID
@@ -107,7 +131,7 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # Ubuntu Live doesn't ship all of these by default. Installing needs network;
 # if the session is offline, whatever's already on the ISO is used and gaps
 # are reported rather than aborting the run. If offline diagnostics become a
-# recurring need, bundle these as .deb files on the Toolbox USB instead of
+# recurring need, bundle these as .deb files on a USB stick instead of
 # relying on apt here.
 REQUIRED_TOOLS=(
   nvme:nvme-cli
@@ -356,32 +380,23 @@ fi
 log "\n=== Secure Boot State ==="
 have mokutil && mokutil --sb-state 2>&1 | tee -a "$OUT"
  
-# --- Dual-boot presence check (most useful on 'after' runs) ------------------
-log "\n=== Bootloader / Dual-Boot Presence Check ==="
+# --- Windows Boot Manager presence check (most useful on 'after' runs) -------
+# v0.7: dropped the Linux/GRUB half of this check for the Windows-only batch
+# (see v0.7 changelog above) — no dual-boot in play for these machines.
+log "\n=== Windows Boot Manager Check ==="
 if [ -n "$BOOTMGR_OUT" ]; then
   if echo "$BOOTMGR_OUT" | grep -qi "windows boot manager"; then
     log "Windows Boot Manager entry : FOUND"
   else
     log "Windows Boot Manager entry : NOT FOUND"
   fi
-  if echo "$BOOTMGR_OUT" | grep -Eqi "ubuntu|mint|grub|opensuse|fedora"; then
-    log "Linux/GRUB boot entry      : FOUND"
-  else
-    log "Linux/GRUB boot entry      : NOT FOUND"
-  fi
 else
   log "efibootmgr unavailable — could not check boot entries."
 fi
- 
-# --- Hardware suitability specs (reported only — no thresholds applied) ------
-log "\n=== Hardware Suitability Specs (for manual dual-boot/Windows-only/Mint-only decision) ==="
-log "RAM (GB)             : $RAM_GB"
-log "Storage type         : $STORAGE_TYPE"
-log "Storage capacity (GB): $STORAGE_CAPACITY_GB"
-log "UEFI capable         : $UEFI_CAPABLE"
-log "NOTE: no thresholds are applied here — methodology.md §5 leaves the"
-log "dual-boot vs Windows-only vs Mint-only decision undefined. Decide"
-log "manually from the specs above until thresholds are agreed."
+
+# v0.7: dropped the "Hardware Suitability Specs" recap block that supported a
+# manual per-machine dual-boot/Windows-only/Mint-only decision — see v0.7
+# changelog above. RAM/storage/UEFI are already logged individually above.
  
 # --- Windows activation reminder (out of scope for this script) -------------
 if [ "$STAGE" = "after" ]; then
@@ -461,9 +476,24 @@ else
 fi
  
 mv "$TMP_CSV" "$SUMMARY_CSV"
- 
+
+# --- Repair ownership if this was (mistakenly) run under sudo ---------------
+# Root is only needed for the individual commands above (nvme, dmidecode,
+# ...) — see "Usage: ./diagnostics.sh" at the top — not the script as a
+# whole. If it WAS invoked via sudo anyway, every file under $RESULTS_DIR
+# ends up root-owned, which blocks the scp/sftp pull later (SFTP runs as the
+# authenticated live-session user, not root, and can't open a root-owned
+# file). Same SUDO_USER-based fix enable-ssh.sh already uses.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+  chown -R "$SUDO_USER:$SUDO_USER" "$RESULTS_DIR"
+fi
+
 echo ""
 echo "Done."
 echo "Full log       : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
-echo "Copy results off the Toolbox USB periodically — it's not permanent storage."
+echo "This live session is not permanent storage — pull these off via SSH once"
+echo "enable-ssh.sh has been run on this machine (see docs/ssh-access.md), e.g."
+echo "from the laptop:"
+echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$OUT ."
+echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$SUMMARY_CSV ."

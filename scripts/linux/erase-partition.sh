@@ -1,8 +1,10 @@
 #!/bin/bash
 # erase-partition.sh — Le Relais PC Refurbishment
 #
-# Runs from the TOOLBOX USB (TOOLBOX/scripts/erase-partition.sh) under Ubuntu
-# Live, between "opening diagnostics" and "Windows 11 install" in the
+# Fetched via raw.githubusercontent.com and run under Ubuntu Live (see
+# CLAUDE.md, "Delivery to target machines" — the Toolbox USB this comment
+# used to describe is retired, see CLAUDE.md "Out of scope / superseded"),
+# between "opening diagnostics" and "Windows 11 install" in the
 # toolkit-reference.md workflow.
 #
 # Unlike diagnostics.sh v0.3 (which only RECOMMENDS a sanitization command),
@@ -11,11 +13,39 @@
 #      carried over from a prior boot session).
 #   2. Sanitizes it, method chosen by drive type (methodology.md §4).
 #   3. Verifies the sanitization independently of the tool that performed it.
-#   4. Creates a GPT table with a single shared ESP (512 MB) and leaves the
-#      rest unallocated for the Windows/Mint installers to partition
-#      themselves — this script does NOT create Windows or Mint partitions.
+#   4. Clears any leftover GPT/MBR partition-table structure (sgdisk
+#      --zap-all) and leaves the disk fully unallocated — this script does
+#      NOT create any partitions; Windows Setup partitions the whole disk
+#      itself (v8; see changelog below).
 #   5. Writes a per-machine erasure report and appends a stage=erase row to
 #      the same results/summary.csv that diagnostics.sh writes to.
+#
+# v8 changes (Windows-only batch — 36 machines, IT dept priority,
+# 2026-09-28, paired with diagnostics.sh v0.7):
+#   - Header comment and the end-of-run reminder updated for the retired
+#     Toolbox USB; end-of-run reminder now points at the SSH-based pull
+#     (docs/ssh-access.md) instead.
+#   - §7 no longer pre-creates a shared 512 MB ESP. That existed so Windows
+#     Setup and, later, Mint's installer could both reuse ONE EFI System
+#     Partition — a dual-boot-specific concern that doesn't apply to this
+#     Windows-only batch. §7 now only zaps any leftover GPT/MBR structure
+#     (still necessary: a crypto erase, NVMe --ses=2, discards the
+#     encryption key rather than zero-writing the disk, so a stale garbled
+#     partition table can survive as unreadable garbage and make Windows
+#     Setup prompt to convert/repair the disk instead of showing plain
+#     unallocated space) and leaves the rest for Windows Setup to partition
+#     end-to-end itself. Dropped mkfs.fat/dosfstools from REQUIRED_TOOLS
+#     accordingly (no longer used). summary.csv's "partitioned" status value
+#     is kept as-is for continuity but now means "sanitized + confirmed
+#     clean partition table," not "ESP created."
+#   - NOT YET VERIFIED on real hardware — test on a real machine before
+#     trusting this across the batch. If the dual-boot/Mint phase resumes
+#     later (CLAUDE.md, "comes later"), pull the pre-created-shared-ESP
+#     version back from git history rather than re-deriving it.
+#   - RESULTS_DIR fixed from "$SCRIPT_DIR/../results" to "$SCRIPT_DIR/results"
+#     — same Toolbox-USB-layout bug as diagnostics.sh v0.7 (see its
+#     changelog for why). Both scripts must be fetched into the same
+#     directory on the target so they agree on where results/ is.
 #
 # v7 changes (summary.csv redesign — one row per machine, paired with
 # diagnostics.sh v0.6):
@@ -228,14 +258,15 @@
 # ambiguous (multiple candidate disks, no matching "before" diagnostic on
 # record, etc.).
 #
-# Usage (from TOOLBOX/scripts/): ./erase-partition.sh
+# Usage: ./erase-partition.sh (must be fetched into the same directory as
+# diagnostics.sh, since both resolve results/ relative to their own location)
  
 set -uo pipefail
 # Deliberately no -e, same rationale as diagnostics.sh: a single missing tool
 # must not silently abort a run that's already made destructive changes.
  
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="$SCRIPT_DIR/../results"
+RESULTS_DIR="$SCRIPT_DIR/results"
 mkdir -p "$RESULTS_DIR"
 SUMMARY_CSV="$RESULTS_DIR/summary.csv"
  
@@ -258,7 +289,6 @@ REQUIRED_TOOLS=(
   hdparm:hdparm
   nwipe:nwipe
   sgdisk:gdisk
-  mkfs.fat:dosfstools
   partprobe:parted
   cmp:diffutils
 )
@@ -763,40 +793,34 @@ if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" != "pass" ]; then
 fi
  
 # ============================================================================
-# 7. Partitioning — ESP only, rest left unallocated (only if erase+verify OK)
+# 7. Partition-table cleanup (only if erase+verify OK)
+#
+# v8: no longer creates a shared ESP — see v8 changelog above. Just zaps any
+# leftover GPT/MBR structure and leaves the disk fully unallocated for
+# Windows Setup to partition end-to-end itself.
 # ============================================================================
 PARTITION_STATUS="not_attempted"
 if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ]; then
-  log "\n=== Partitioning (GPT, single 512 MB ESP, remainder left unallocated) ==="
- 
+  log "\n=== Partition-table cleanup (zap only — Windows Setup partitions the rest) ==="
+
   run_logged "sgdisk_zap" sudo sgdisk --zap-all "$PRIMARY_DEV"
-  run_logged "sgdisk_create_esp" sudo sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI System Partition" "$PRIMARY_DEV"
+  ZAP_EXIT=$?
   have partprobe && sudo partprobe "$PRIMARY_DEV" 2>&1 | tee -a "$OUT" >/dev/null
-  sleep 2
- 
-  if [[ "$PRIMARY_DEV" == *nvme* ]]; then
-    ESP_PART="${PRIMARY_DEV}p1"
-  else
-    ESP_PART="${PRIMARY_DEV}1"
-  fi
- 
-  if [ -b "$ESP_PART" ]; then
-    run_logged "mkfs_esp" sudo mkfs.fat -F32 -n EFI "$ESP_PART"
+
+  if [ "$ZAP_EXIT" -eq 0 ]; then
     PARTITION_STATUS="ok"
   else
-    log "ERROR: expected ESP partition $ESP_PART not found after sgdisk/partprobe — partitioning did not complete as expected."
+    log "ERROR: sgdisk --zap-all failed (exit $ZAP_EXIT) — partition table may not be clean."
     PARTITION_STATUS="fail"
   fi
- 
-  log "\n-- Resulting partition table --"
+
+  log "\n-- Resulting partition table (should be empty) --"
   sudo sgdisk -p "$PRIMARY_DEV" 2>&1 | tee -a "$OUT" >/dev/null
   have lsblk && lsblk "$PRIMARY_DEV" 2>&1 | tee -a "$OUT" >/dev/null
- 
-  log "\nNext steps (outside this script): boot the Windows 11 USB and point"
-  log "Setup at the unallocated space — it will use this existing ESP rather"
-  log "than creating a second one. Later, point Mint's installer (manual/"
-  log "'something else' mode) at the remaining unallocated space and mount"
-  log "this ESP at /boot/efi instead of letting it create a new one."
+
+  log "\nNext step (outside this script): boot the Windows 11 USB and install"
+  log "to this disk's unallocated space — Setup creates its own ESP/MSR/"
+  log "recovery partitions from scratch."
 fi
  
 # ============================================================================
@@ -845,6 +869,8 @@ SAFE_ERASE_METHOD=$(echo "$ERASE_METHOD" | tr ',' ';')
  
 if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ]; then
   NEW_ERASE_RESULT="pass"
+  # v8: "partitioned" now means "sanitized + confirmed clean partition table
+  # (zap succeeded)," not "ESP created" — see v8 changelog above.
   if [ "$PARTITION_STATUS" = "ok" ]; then
     NEW_STATUS="partitioned"
   else
@@ -894,10 +920,25 @@ if [ "$PARTITION_STATUS" = "ok" ]; then
   rm -f "$STATE_FILE"
   log "[state] checkpoint cleared — run completed successfully."
 fi
- 
+
+# --- Repair ownership if this was (mistakenly) run under sudo ---------------
+# Root is only needed for the individual commands above (nvme, sgdisk, ...)
+# — see "Usage: ./erase-partition.sh" at the top — not the script as a
+# whole. If it WAS invoked via sudo anyway, every file under $RESULTS_DIR
+# ends up root-owned, which blocks the scp/sftp pull later (SFTP runs as the
+# authenticated live-session user, not root, and can't open a root-owned
+# file). Same SUDO_USER-based fix diagnostics.sh uses.
+if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+  chown -R "$SUDO_USER:$SUDO_USER" "$RESULTS_DIR"
+fi
+
 echo ""
 echo "Done."
 echo "Full report    : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
 echo "Erase status   : exit=$ERASE_EXIT, verify=$VERIFY_RESULT, partition=$PARTITION_STATUS"
-echo "Copy results off the Toolbox USB periodically — it's not permanent storage."
+echo "This live session is not permanent storage — pull these off via SSH once"
+echo "enable-ssh.sh has been run on this machine (see docs/ssh-access.md), e.g."
+echo "from the laptop:"
+echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$OUT ."
+echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$SUMMARY_CSV ."

@@ -62,10 +62,9 @@ fixture set (e.g. an HDD case).
 
 4. **Get the files into `tests/fixtures/00X-<drive-type>/` in the repo.** As of
    2026-09-28, `scripts/linux/enable-ssh.sh` + `docs/ssh-access.md` gives a
-   CONFIRMED-working path: `scp -O` the capture off the target straight to the
-   laptop (note the `-O` — see the known issue in `docs/ssh-access.md`). A spare
-   USB stick or manual copy-paste both still work too, if SSH isn't set up on a
-   given machine.
+   CONFIRMED-working path: `scp` the capture off the target straight to the
+   laptop. A spare USB stick or manual copy-paste both still work too, if SSH
+   isn't set up on a given machine.
 
 5. **Before committing:** run `git status` / `git diff --staged` and check against step 3
    above one more time, per the repo's secrets rule (CLAUDE.md, Safety rules).
