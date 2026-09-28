@@ -6,6 +6,43 @@
 # wipe a disk, install anything, or verify Windows activation — those stay
 # outside this script's scope (see comments below for why).
 #
+# v0.6 changes from v0.5 (summary.csv redesign — one row per machine):
+#   - summary.csv is now keyed on machine_serial (chassis serial) with
+#     exactly ONE ROW PER MACHINE, not one row per stage. This script now
+#     upserts: it looks for an existing row whose machine_serial matches
+#     this machine's chassis serial and updates it in place; if none
+#     exists, it inserts a new row.
+#   - Fixes a real ambiguity in the old schema: "serial_number" held the
+#     chassis serial on stage=before rows but the DRIVE serial on
+#     stage=erase rows written by erase-partition.sh — same column,
+#     different meaning depending which script wrote it. The new
+#     machine_serial column always means chassis serial; drive_serial
+#     always means the drive's own serial. Found while reviewing
+#     CIAD7562/CIAD7483's rows side by side — see chat for the full
+#     writeup.
+#   - New pared-down 12-column schema:
+#       machine_serial, ciad_number, ram_gb, storage_type,
+#       storage_capacity_gb, drive_serial, smart_status, erase_method,
+#       erase_result, os_installed, status, date
+#     This script only owns and writes: machine_serial, ciad_number,
+#     ram_gb, storage_type, storage_capacity_gb, drive_serial,
+#     smart_status, date. On update, it leaves erase_method, erase_result
+#     and os_installed exactly as they were — those columns belong to
+#     erase-partition.sh (and, later, an install-verification script) and
+#     this script has no business touching them.
+#   - status is only ever set to "before" when INSERTING a brand-new row.
+#     If the row already exists with a status further along (e.g.
+#     "erased"), a re-run of this script (e.g. the legacy re-diagnosis
+#     case from known-issues.md) does not downgrade it back to "before".
+#   - Dropped from the CSV entirely (still in this machine's own .txt log,
+#     just no longer summarized): cpu_model, and the old per-stage
+#     date_processed/stage columns (replaced by a single date column that
+#     reflects whichever stage last touched the row).
+#   - STAGE=after is still recorded in the .txt report as before, but does
+#     NOT yet get its own place in summary.csv — closing diagnostics gets
+#     dedicated columns only once that stage is actually built (deferred,
+#     not forgotten).
+#
 # v0.5 changes from v0.4 (bugfix):
 #   - Also detects and records the DRIVE'S OWN serial number (via
 #     `nvme id-ctrl` / `smartctl -i`), in a new `drive_serial` column —
@@ -356,32 +393,77 @@ if [ "$STAGE" = "after" ]; then
   log "CIAD number in whatever tracking you're keeping outside this script."
 fi
  
-# --- Machine-readable summary row ---------------------------------------------
-# Schema shared with erase-partition.sh (stage=erase rows). Diagnostic rows
-# (stage=before/after) leave erase_method..verify_result blank; only
-# erase-partition.sh populates them. drive_serial (added in v0.5) is
-# populated by both scripts and is the field erase-partition.sh's
-# pre-sanitize cross-check matches on — NOT serial_number, which stays the
-# machine/chassis serial on rows written by this script.
-EXPECTED_HEADER="serial_number,ciad_number,date_processed,stage,cpu_model,ram_gb,storage_type,storage_capacity_gb,smart_status,erase_method,erase_start,erase_end,erase_exit_status,verify_method,verify_result,drive_serial"
+# --- Machine-readable summary — upsert one row per machine -------------------
+# summary.csv is now ONE ROW PER MACHINE, keyed on machine_serial (chassis
+# serial — the source of truth per methodology.md §3), not one row per
+# stage. This script only owns and writes: machine_serial, ciad_number,
+# ram_gb, storage_type, storage_capacity_gb, drive_serial, smart_status,
+# date. It sets status="before" only when inserting a brand-new row — an
+# existing row's status (e.g. "erased", written by erase-partition.sh) is
+# never downgraded by a re-run of this script, which matters for the
+# legacy-row re-diagnosis case in known-issues.md. Columns owned by other
+# scripts (erase_method, erase_result, os_installed) are carried over
+# untouched on update, left blank on insert.
+#
+# NOTE: STAGE=after is still recorded in this machine's own .txt report as
+# always, but doesn't yet update anything in summary.csv beyond the columns
+# above — closing diagnostics gets its own dedicated columns once that
+# stage is actually built (deferred per the 2026-09-23 CSV redesign).
+log "\n=== Recording result ==="
+ 
+EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date"
  
 if [ ! -f "$SUMMARY_CSV" ]; then
   echo "$EXPECTED_HEADER" > "$SUMMARY_CSV"
-else
-  CURRENT_HEADER=$(head -n1 "$SUMMARY_CSV")
-  if ! echo "$CURRENT_HEADER" | grep -q "drive_serial"; then
-    log "WARNING: summary.csv still has the pre-v0.5 15-column header (no"
-    log "drive_serial). Appending this row in the 16-column format anyway —"
-    log "existing rows won't have drive_serial until their machines are"
-    log "re-diagnosed under this version. See known-issues.md."
-  fi
 fi
  
-echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$(date -I)\",\"$STAGE\",\"$CPU_MODEL\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$SMART_STATUS\",\"\",\"\",\"\",\"\",\"\",\"\",\"$DRIVE_SERIAL\"" >> "$SUMMARY_CSV"
+CURRENT_HEADER=$(head -n1 "$SUMMARY_CSV")
+if [ "$CURRENT_HEADER" != "$EXPECTED_HEADER" ]; then
+  log "WARNING: summary.csv's header doesn't match the current one-row-per-machine"
+  log "schema (machine_serial-keyed, 12 columns). This usually means the file"
+  log "still has rows in the old one-row-per-stage format and needs migrating by"
+  log "hand — proceeding anyway rather than aborting a diagnostic run, but don't"
+  log "trust this upsert to have found the right row until that's done."
+fi
+ 
+TMP_CSV=$(mktemp)
+MATCHED=0
+{
+  IFS= read -r hdr_line
+  echo "$hdr_line"
+  while IFS= read -r row; do
+    ROW_SERIAL=$(echo "$row" | awk -F',' '{print $1}' | tr -d '"')
+    if [ "$ROW_SERIAL" = "$SERIAL" ]; then
+      MATCHED=1
+      # Carry columns 8-10 (erase_method, erase_result, os_installed)
+      # forward untouched — this script has no business setting them.
+      OLD_ERASE_METHOD=$(echo "$row" | awk -F',' '{print $8}')
+      OLD_ERASE_RESULT=$(echo "$row" | awk -F',' '{print $9}')
+      OLD_OS_INSTALLED=$(echo "$row" | awk -F',' '{print $10}')
+      OLD_STATUS=$(echo "$row" | awk -F',' '{print $11}')
+      NEW_STATUS="$OLD_STATUS"
+      STATUS_BARE=$(echo "$OLD_STATUS" | tr -d '"')
+      # Only ever set to "before" if nothing further has been recorded yet —
+      # never downgrade progress an erase/partition run already made.
+      [ -z "$STATUS_BARE" ] && NEW_STATUS="\"before\""
+      echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$DRIVE_SERIAL\",\"$SMART_STATUS\",$OLD_ERASE_METHOD,$OLD_ERASE_RESULT,$OLD_OS_INSTALLED,$NEW_STATUS,\"$(date -I)\""
+    else
+      echo "$row"
+    fi
+  done
+} < "$SUMMARY_CSV" > "$TMP_CSV"
+ 
+if [ "$MATCHED" -eq 0 ]; then
+  echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$DRIVE_SERIAL\",\"$SMART_STATUS\",\"\",\"\",\"\",\"before\",\"$(date -I)\"" >> "$TMP_CSV"
+  log "New machine — inserted row for $SERIAL (CIAD $CIAD_NUMBER)."
+else
+  log "Existing machine — updated row for $SERIAL (CIAD $CIAD_NUMBER) in place."
+fi
+ 
+mv "$TMP_CSV" "$SUMMARY_CSV"
  
 echo ""
 echo "Done."
 echo "Full log       : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
 echo "Copy results off the Toolbox USB periodically — it's not permanent storage."
- 
