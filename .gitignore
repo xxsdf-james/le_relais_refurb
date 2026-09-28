@@ -1,0 +1,5 @@
+# Session handoffs are working documents for picking a conversation back up,
+# not durable project docs -- see the pattern already established for the
+# Mint-test handoffs (mined for findings into known-issues.md/methodology.md,
+# never committed as-is). Matches handoff-*.md and *-handoff-*.md at any depth.
+*handoff*.md
