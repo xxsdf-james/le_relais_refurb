@@ -39,3 +39,12 @@ Each entry: **Symptom → Cause → Fix**, plus how broadly it's expected to app
 - **Applies to**: every machine sanitized via either `nwipe` branch (NVMe Clear-tier fallback or plain HDD) before this fix landed — i.e. the whole batch run so far that hit either of those paths, not just 001/CIAD7562. Unlike the drive_serial issue above, this doesn't invalidate any prior result (the extra pass didn't harm anything, it just wasted time) — no re-run needed on already-processed machines, only faster runs going forward.
 
 ---
+
+### `hdparm --security-erase-enhanced` fails erase-partition.sh's own verification on a real SATA SSD
+- **Symptom**: on 002 (SATA SSD), `erase-partition.sh` v9's SATA-SSD branch ran `hdparm --security-erase-enhanced` to completion (`exit=0`), but the following `readback-sample` verification step then failed — non-zero data present at the offset-0% sample.
+- **Cause**: per ATA spec, plain `SECURITY ERASE UNIT` is defined to write binary zeroes to user data areas; `ENHANCED SECURITY ERASE UNIT` writes a manufacturer-defined pattern instead, which is not guaranteed to be zero. `erase-partition.sh`'s `readback-sample` verification only checks sampled offsets against an all-zero reference (`cmp` against `/dev/zero`) — a design choice that was fine when the SATA-SSD branch used plain Secure Erase exclusively, but breaks the moment Enhanced is used on a drive whose vendor pattern isn't zero.
+- **Confirmation**: re-running the identical drive (002) with the prior (v1-tagged) script — plain `--security-erase`, no Enhanced preference — passed verification cleanly at every sampled offset. Same drive, same verification method, only the erase variant changed.
+- **Fix**: `erase-partition.sh` v10 reverts the SATA-SSD branch to plain `--security-erase` only; the Enhanced-preferring branch introduced in v9 is removed. See `methodology.md` §4.3 for the full reasoning, including why teaching the verification step to accept a non-zero pattern instead was considered and rejected (added complexity for a benefit — Enhanced's broader reallocated/spare-sector coverage — that isn't NIST-certified in the first place; see the same section).
+- **Applies to**: any machine that would have hit the SATA-SSD branch between v9's introduction and v10's revert (2026-09-28, same day — narrow window, but worth checking `erase_method` in any affected machine's `summary.csv` row if that window is uncertain). Machines sanitized with v1–v8's plain `--security-erase`, or v10 onward, are unaffected.
+
+---

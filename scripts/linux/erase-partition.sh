@@ -48,6 +48,31 @@
 #     §4.3 documents this as a reasoned judgment call, same treatment as
 #     §4.1's NVMe Clear-tier fallback exception.
 #
+# v10 changes (revert v9's Enhanced-erase preference — empirically broke
+# verification on real hardware):
+#   - 2026-09-28, 002/SATA SSD: v9's `--security-erase-enhanced` completed
+#     (exit=0) but readback-sample verification then failed at offset 0%
+#     with non-zero data present. Re-running the SAME drive with the v1
+#     script (plain `--security-erase`) passed verification cleanly at
+#     every sampled offset. This is the concrete, on-hardware confirmation
+#     of the spec distinction only described in theory in v9's changelog:
+#     plain SECURITY ERASE UNIT is spec-defined to write binary zeroes;
+#     ENHANCED SECURITY ERASE UNIT writes a manufacturer-defined pattern,
+#     not guaranteed to be zero. This script's readback-sample verification
+#     only checks for zero (§6) — so Enhanced was always going to look like
+#     a failure on any drive whose vendor pattern isn't zero, independent of
+#     whether the drive was actually sanitized.
+#   - Reverted to plain `--security-erase` only, dropping v9's
+#     enhanced-detection branch entirely. Considered instead teaching
+#     verification to accept a captured non-zero pattern, but rejected: real
+#     engineering complexity for a benefit (Enhanced's broader
+#     reallocated/spare-sector coverage) already documented in
+#     methodology.md §4.3 as not NIST-certified anyway — not worth adding a
+#     second way to get sanitization verification wrong across ~100
+#     machines. See methodology.md §4.3's dated correction note.
+#   - The suspend-to-RAM frozen-state fix from v9 is unaffected and stays —
+#     it's independently confirmed and unrelated to this bug.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -698,22 +723,16 @@ case "$STORAGE_TYPE" in
     ;;
  
   "SATA SSD (non-rotational)")
-    log "NOTE: SATA-SSD secure-erase path — confirmed on real hardware 2026-09-28 (002). Tier classification is a documented judgment call, not a NIST-certified Purge result — see methodology.md §4.3."
+    log "NOTE: SATA-SSD secure-erase path — confirmed on real hardware 2026-09-28 (002). Uses plain --security-erase deliberately, not Enhanced — see methodology.md §4.3 (v10 correction)."
     FROZEN_CHECK=$(sudo hdparm -I "$PRIMARY_DEV" 2>&1)
     log "\n-- hdparm -I security state --"
     echo "$FROZEN_CHECK" | tee -a "$OUT" >/dev/null
     if echo "$FROZEN_CHECK" | grep -Eqi "^\s*frozen\b" ; then
       die "Drive reports security state FROZEN — hdparm secure erase will fail. This is a known BIOS/ATA behavior (BIOS reissues SECURITY FREEZE LOCK on every POST). Confirmed fix (002, 2026-09-28): suspend the machine to RAM (S3) and resume — this forces a SATA link reset without going through BIOS POST, so the freeze-lock command is never reissued. A full power-off/power-on cycle is NOT reliable by itself, since it goes through POST again and typically refreezes the drive. Nothing was erased."
     fi
-    if echo "$FROZEN_CHECK" | grep -qi "supported: enhanced erase"; then
-      ERASE_METHOD="hdparm security-erase-enhanced"
-      ERASE_FLAG="--security-erase-enhanced"
-    else
-      ERASE_METHOD="hdparm security-erase (enhanced not supported by this drive)"
-      ERASE_FLAG="--security-erase"
-    fi
+    ERASE_METHOD="hdparm security-erase"
     run_logged "hdparm_set_pass" sudo hdparm --user-master u --security-set-pass p1 "$PRIMARY_DEV"
-    run_logged "hdparm_secure_erase" sudo hdparm --user-master u "$ERASE_FLAG" p1 "$PRIMARY_DEV"
+    run_logged "hdparm_secure_erase" sudo hdparm --user-master u --security-erase p1 "$PRIMARY_DEV"
     ERASE_EXIT=$?
     VERIFY_METHOD="readback-sample"
     ;;
