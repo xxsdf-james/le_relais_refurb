@@ -60,18 +60,22 @@ fixture set (e.g. an HDD case).
    isn't: BIOS/UEFI passwords surfacing in a dmidecode string, stray Wi-Fi credentials,
    anything Le Relais-internal beyond the asset itself.
 
-4. **Get the files into `tests/fixtures/00X-<drive-type>/` in the repo.** There's no
-   defined path for this yet — it's the same open item as "where diagnostic results go
-   without the Toolbox USB" (see handoff, Open items). For a one-off capture on two
-   machines, a spare USB stick or manually copying terminal output into files on the
-   Bluefin laptop both work; this doesn't need to wait on that decision being finalized.
+4. **Get the files into `tests/fixtures/00X-<drive-type>/` in the repo.** As of
+   2026-09-28, `scripts/linux/enable-ssh.sh` + `docs/ssh-access.md` gives a
+   CONFIRMED-working path: `scp -O` the capture off the target straight to the
+   laptop (note the `-O` — see the known issue in `docs/ssh-access.md`). A spare
+   USB stick or manual copy-paste both still work too, if SSH isn't set up on a
+   given machine.
 
 5. **Before committing:** run `git status` / `git diff --staged` and check against step 3
    above one more time, per the repo's secrets rule (CLAUDE.md, Safety rules).
 
 ## Known dependency
 
-Getting captures off a target machine shares the same open blocker as routine
-`diagnostics.sh` results ("where diagnostic results go without the Toolbox USB"). That
-question needs an answer before `diagnostics.sh` can be rewritten to not assume the
-Toolbox USB — but it doesn't block this one-off fixture capture on two machines.
+Getting captures off a target machine used to share the same open blocker as routine
+`diagnostics.sh` results ("where diagnostic results go without the Toolbox USB").
+`docs/ssh-access.md` now gives a working answer for ad hoc/troubleshooting use
+(CONFIRMED 2026-09-28, used for the 002-sata-ssd fixtures) — whether that becomes the
+standard answer for routine `diagnostics.sh` runs across all ~100 machines, versus
+just the bench-troubleshooting case it was built for, is still Hamish's call, not
+decided here.
