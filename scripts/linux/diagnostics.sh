@@ -6,6 +6,19 @@
 # wipe a disk, install anything, or verify Windows activation — those stay
 # outside this script's scope (see comments below for why).
 #
+# v0.4 changes from v0.3:
+#   - Report filename now includes the CIAD number:
+#       diag_${MACHINE_ID}_${CIAD_NUMBER}_${STAGE}.txt
+#     e.g. diag_001_CIAD7562_before.txt — matches erase-partition.sh's
+#     naming convention so a filename can be matched directly to the
+#     physical asset sticker.
+#   - summary.csv header extended to the same 15-column schema
+#     erase-partition.sh writes to (erase_method, erase_start, erase_end,
+#     erase_exit_status, verify_method, verify_result appended). Diagnostic
+#     rows (stage=before/after) leave those six columns blank; only
+#     stage=erase rows populate them. This keeps one file, one schema,
+#     joinable by serial_number across all three stages from day one.
+#
 # Usage (from TOOLBOX/scripts/): ./diagnostics.sh
  
 set -uo pipefail
@@ -20,12 +33,12 @@ read -rp "Machine ID/label: " MACHINE_ID
 read -rp "CIAD number (manual entry, traceability to legacy tracking): " CIAD_NUMBER
 read -rp "Stage (before/after): " STAGE
  
-OUT="$RESULTS_DIR/diag_${MACHINE_ID}_${STAGE}.txt"
+OUT="$RESULTS_DIR/diag_${MACHINE_ID}_${CIAD_NUMBER}_${STAGE}.txt"
 SUMMARY_CSV="$RESULTS_DIR/summary.csv"
  
 log() { echo -e "$1" | tee -a "$OUT"; }
  
-echo "Diagnostics for ${MACHINE_ID} (${STAGE})" > "$OUT"
+echo "Diagnostics for ${MACHINE_ID} (CIAD ${CIAD_NUMBER}, ${STAGE})" > "$OUT"
 date >> "$OUT"
  
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -278,10 +291,24 @@ if [ "$STAGE" = "after" ]; then
 fi
  
 # --- Machine-readable summary row ---------------------------------------------
+# Schema shared with erase-partition.sh (stage=erase rows). Diagnostic rows
+# (stage=before/after) leave the six erase-specific columns blank; only
+# erase-partition.sh populates them. One file, one schema, joinable by
+# serial_number across before/erase/after.
+EXPECTED_HEADER="serial_number,ciad_number,date_processed,stage,cpu_model,ram_gb,storage_type,storage_capacity_gb,smart_status,erase_method,erase_start,erase_end,erase_exit_status,verify_method,verify_result"
+ 
 if [ ! -f "$SUMMARY_CSV" ]; then
-  echo "serial_number,ciad_number,date_processed,stage,cpu_model,ram_gb,storage_type,storage_capacity_gb,smart_status" > "$SUMMARY_CSV"
+  echo "$EXPECTED_HEADER" > "$SUMMARY_CSV"
+else
+  CURRENT_HEADER=$(head -n1 "$SUMMARY_CSV")
+  if ! echo "$CURRENT_HEADER" | grep -q "erase_method"; then
+    log "WARNING: summary.csv still has the pre-v0.4 9-column header. Appending"
+    log "this row in the extended 15-column format anyway — existing rows won't"
+    log "have the new columns until the header is migrated by hand."
+  fi
 fi
-echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$(date -I)\",\"$STAGE\",\"$CPU_MODEL\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$SMART_STATUS\"" >> "$SUMMARY_CSV"
+ 
+echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$(date -I)\",\"$STAGE\",\"$CPU_MODEL\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$SMART_STATUS\",\"\",\"\",\"\",\"\",\"\",\"\"" >> "$SUMMARY_CSV"
  
 echo ""
 echo "Done."
@@ -289,3 +316,4 @@ echo "Full log       : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
 echo "Copy results off the Toolbox USB periodically — it's not permanent storage."
  
+
