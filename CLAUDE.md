@@ -29,6 +29,14 @@ tests/fixtures/    raw hardware output captured from real machines (001 NVMe, 00
 
 Real results (`summary.csv`, per-machine `.txt` logs) never go in the repo.
 
+## Sandbox artifacts (ignore)
+
+A Claude Code session's `git status` may show untracked dotfiles/dirs in the repo root
+(`.bashrc`, `.gitconfig`, `.vscode`, `.idea`, `.mcp.json`, `.claude/`, etc.). These are
+artifacts of the sandbox environment the session runs in, not real files in this location
+on Hamish's actual filesystem — confirmed by Hamish, 2026-09-28. Don't try to clean them
+up, `.gitignore` them, or otherwise treat them as project clutter.
+
 ## Status of the docs
 
 `docs/` are living documents, not authoritative. They are the best current record of what
