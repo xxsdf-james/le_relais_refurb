@@ -119,10 +119,22 @@ authenticates you to the target, not the target's identity to you) — the
 real trust boundary is physical: you're at the bench, you just watched
 `enable-ssh.sh` print that connect command.
 
-Fix — remove only the stale entry, then reconnect and accept the new key:
+Fix — remove the stale entry, then add the new key non-interactively:
 ```
 ssh-keygen -R <target-ip>
+ssh-keyscan -t ed25519 <target-ip> >> ~/.ssh/known_hosts
 ```
+CONFIRMED 2026-09-28: after `ssh-keygen -R`, the normal interactive
+"continue connecting (yes/no)?" prompt for the new key did not get
+answered when `scp` ran nested inside a script — it failed closed
+("Host key verification failed") rather than waiting for input. Cause not
+fully isolated, but `ssh-keyscan` sidesteps it entirely by adding the key
+non-interactively, which is the same trust-on-first-use acceptance a
+manual "yes" would have done anyway (see above — there's nothing to
+verify the new key against either way). `scripts/laptop/pull-results.sh`
+now does this automatically before each pull; do the same by hand before
+a plain interactive `ssh`/`scp` session if you hit this.
+
 Don't disable `StrictHostKeyChecking` globally to work around this; it's
 still meaningful for anything outside this specific ephemeral-live-session
 case (e.g. non-LAN-local connections).

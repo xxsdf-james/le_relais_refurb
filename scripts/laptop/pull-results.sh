@@ -14,11 +14,11 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: pull-results.sh <target-ip> <machine-label> [remote-user] [remote-results-dir]
+Usage: pull-results.sh <target-ip|user@target-ip> <machine-label> [remote-user] [remote-results-dir]
 
-  target-ip           e.g. 192.168.8.18
+  target-ip           e.g. 192.168.8.18, or ubuntu@192.168.8.18 (either form works)
   machine-label       local folder name to file this machine's results under
-  remote-user         default: ubuntu
+  remote-user         default: ubuntu (ignored if user@ was given in the first arg)
   remote-results-dir  default: results (relative to the remote user's home,
                        resolved by the SFTP server — safe regardless of scp's
                        own tilde-expansion behavior). diagnostics.sh prints
@@ -35,9 +35,16 @@ if [ "$#" -lt 2 ]; then
   exit 1
 fi
 
-TARGET_IP="$1"
+TARGET_ARG="$1"
+if [[ "$TARGET_ARG" == *"@"* ]]; then
+  REMOTE_USER="${TARGET_ARG%%@*}"
+  TARGET_IP="${TARGET_ARG#*@}"
+else
+  TARGET_IP="$TARGET_ARG"
+  REMOTE_USER="ubuntu"
+fi
 MACHINE_LABEL="$2"
-REMOTE_USER="${3:-ubuntu}"
+REMOTE_USER="${3:-$REMOTE_USER}"
 REMOTE_RESULTS_DIR="${4:-results}"
 
 KEY="$HOME/.ssh/id_ed25519_refurb"
@@ -45,6 +52,14 @@ LOCAL_BASE="${LE_RELAIS_RESULTS_DIR:-$HOME/le-relais-results}"
 LOCAL_DEST="$LOCAL_BASE/$MACHINE_LABEL"
 
 mkdir -p "$LOCAL_DEST"
+
+# Each live-session boot has a fresh, unpersisted host key (docs/ssh-access.md,
+# "REMOTE HOST IDENTIFICATION HAS CHANGED"), and the interactive accept prompt
+# for a new key doesn't reliably get answered when scp runs nested in a
+# script (confirmed 2026-09-28) — so replace whatever's cached for this IP
+# with a freshly scanned key every time, non-interactively.
+ssh-keygen -R "$TARGET_IP" >/dev/null 2>&1 || true
+ssh-keyscan -t ed25519 "$TARGET_IP" >> "$HOME/.ssh/known_hosts" 2>/dev/null
 
 echo "Pulling from ${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/ -> $LOCAL_DEST"
 
