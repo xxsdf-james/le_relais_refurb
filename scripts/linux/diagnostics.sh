@@ -6,18 +6,41 @@
 # wipe a disk, install anything, or verify Windows activation — those stay
 # outside this script's scope (see comments below for why).
 #
+# v0.5 changes from v0.4 (bugfix):
+#   - Also detects and records the DRIVE'S OWN serial number (via
+#     `nvme id-ctrl` / `smartctl -i`), in a new `drive_serial` column —
+#     separate from `serial_number`, which remains the machine's chassis
+#     serial (dmidecode -t system). These are two different numbers.
+#     erase-partition.sh's pre-sanitize cross-check matches against the
+#     DRIVE's serial, but until this version, only the machine's chassis
+#     serial was ever recorded — so that cross-check was comparing a drive
+#     serial against a machine serial and could only ever match by
+#     coincidence. This is why erase-partition.sh reported no matching
+#     "before" row on 001/CIAD7562 even though one existed.
+#   - summary.csv schema extends to 16 columns: drive_serial appended at
+#     the end. Existing 15 columns/order unchanged.
+#   - IMPORTANT — this does not retroactively fix old rows: any machine
+#     whose "before" diagnostic was run under v0.3 or v0.4 has no
+#     drive_serial recorded, and erase-partition.sh (updated alongside
+#     this) will refuse to proceed on it with a message telling you to
+#     re-run this "before" stage under this version first. See
+#     known-issues.md for the full writeup and batch-wide impact.
+#   - Windows-activation reminder (below) no longer points at
+#     hardware-inventory.csv — that file is no longer part of this
+#     project's active toolkit; summary.csv is the working record now.
+#     See methodology.md §9.
+#
 # v0.4 changes from v0.3:
 #   - Report filename now includes the CIAD number:
 #       diag_${MACHINE_ID}_${CIAD_NUMBER}_${STAGE}.txt
 #     e.g. diag_001_CIAD7562_before.txt — matches erase-partition.sh's
 #     naming convention so a filename can be matched directly to the
 #     physical asset sticker.
-#   - summary.csv header extended to the same 15-column schema
-#     erase-partition.sh writes to (erase_method, erase_start, erase_end,
-#     erase_exit_status, verify_method, verify_result appended). Diagnostic
-#     rows (stage=before/after) leave those six columns blank; only
-#     stage=erase rows populate them. This keeps one file, one schema,
-#     joinable by serial_number across all three stages from day one.
+#   - summary.csv header extended to the same schema erase-partition.sh
+#     writes to (erase_method, erase_start, erase_end, erase_exit_status,
+#     verify_method, verify_result appended). Diagnostic rows
+#     (stage=before/after) leave those six columns blank; only
+#     stage=erase rows populate them.
 #
 # Usage (from TOOLBOX/scripts/): ./diagnostics.sh
  
@@ -77,6 +100,12 @@ if [ "${#MISSING_PKGS[@]}" -gt 0 ]; then
 fi
  
 # --- Machine identity ----------------------------------------------------------
+# This is the CHASSIS/MOTHERBOARD serial (dmidecode) — source of truth for
+# the machine identifier per methodology.md §3. It is a DIFFERENT number
+# from the drive's own serial (detected below, in Storage Detection). A
+# drive can be swapped between chassis without the chassis serial changing,
+# so the two numbers answer different questions and neither substitutes
+# for the other.
 SERIAL="unknown"
 if have dmidecode; then
   SERIAL=$(sudo dmidecode -t system 2>/dev/null | awk -F': ' '/Serial Number/{print $2; exit}')
@@ -84,9 +113,9 @@ if have dmidecode; then
 fi
  
 log "\n=== Machine Identity ==="
-log "Machine label : $MACHINE_ID"
-log "Serial number : $SERIAL   (source of truth — dmidecode -t system, methodology.md §3)"
-log "CIAD number   : $CIAD_NUMBER   (manual entry, legacy-system traceability)"
+log "Machine label  : $MACHINE_ID"
+log "Serial number  : $SERIAL   (machine/chassis serial — dmidecode -t system, methodology.md §3. NOT the drive serial below.)"
+log "CIAD number    : $CIAD_NUMBER   (manual entry, legacy-system traceability)"
  
 CPU_MODEL="unknown"
 have lscpu && CPU_MODEL=$(lscpu | awk -F': *' '/Model name/{print $2; exit}')
@@ -128,9 +157,9 @@ log "\n=== CPU ==="
 have lscpu && lscpu 2>&1 | tee -a "$OUT"
  
 # --- Storage: detect the primary drive, classify it, collect health data -----
-# Assumption (per hardware-inventory.csv's single storage_type/
-# storage_capacity_gb columns): one primary internal storage device per
-# machine. USB boot media is excluded from candidacy.
+# Assumption: one primary internal storage device per machine (see
+# methodology.md — the workflow doesn't handle multi-disk machines). USB
+# boot media is excluded from candidacy.
 log "\n=== Storage Detection ==="
  
 PRIMARY_DEV=""
@@ -155,17 +184,48 @@ elif have lsblk; then
   fi
 fi
  
+# --- Drive's own identity (separate from the machine identity above) --------
+# This is the number erase-partition.sh's pre-sanitize cross-check matches
+# against — it proves the physical drive under the screwdriver is the one
+# this diagnostic actually ran on. Detection mirrors erase-partition.sh's
+# own detection exactly (same tools, same fields), since the two values
+# only mean anything if they're read the same way.
+DRIVE_SERIAL="unknown"
+DRIVE_MODEL="unknown"
+if [ -n "$PRIMARY_DEV" ]; then
+  if [ "$STORAGE_TYPE" = "NVMe" ] && have nvme; then
+    ID_CTRL=$(sudo nvme id-ctrl "$PRIMARY_DEV" 2>/dev/null)
+    DRIVE_SERIAL=$(echo "$ID_CTRL" | awk -F': *' '/^sn[[:space:]]*:/{print $2; exit}' | tr -d '[:space:]')
+    DRIVE_MODEL=$(echo "$ID_CTRL" | awk -F': *' '/^mn[[:space:]]*:/{print $2; exit}')
+  elif have smartctl; then
+    SM_I=$(sudo smartctl -i "$PRIMARY_DEV" 2>/dev/null)
+    DRIVE_SERIAL=$(echo "$SM_I" | awk -F': *' '/Serial Number/{print $2; exit}' | tr -d '[:space:]')
+    DRIVE_MODEL=$(echo "$SM_I" | awk -F': *' '/Device Model|Model Number/{print $2; exit}')
+  fi
+fi
+[ -z "$DRIVE_SERIAL" ] && DRIVE_SERIAL="unknown"
+[ -z "$DRIVE_MODEL" ] && DRIVE_MODEL="unknown"
+ 
 if [ -z "$PRIMARY_DEV" ]; then
   log "Could not identify a primary storage device automatically — check manually with 'lsblk -f'."
 else
   log "Primary device : $PRIMARY_DEV"
   log "Detected type  : $STORAGE_TYPE"
+  log "Drive model    : $DRIVE_MODEL"
+  log "Drive serial   : $DRIVE_SERIAL   (drive's OWN reported serial — nvme id-ctrl/smartctl -i. erase-partition.sh matches against THIS, not the machine serial above.)"
  
   if have lsblk; then
     CAP_BYTES=$(lsblk -bdno SIZE "$PRIMARY_DEV" 2>/dev/null)
     [ -n "$CAP_BYTES" ] && STORAGE_CAPACITY_GB=$(( CAP_BYTES / 1000 / 1000 / 1000 ))
   fi
   log "Capacity       : ${STORAGE_CAPACITY_GB} GB"
+ 
+  if [ "$DRIVE_SERIAL" = "unknown" ]; then
+    log "WARNING: could not read the drive's own serial number. erase-partition.sh"
+    log "will not be able to cross-check this 'before' row later — investigate"
+    log "why (missing nvme-cli/smartmontools? unsupported drive?) before relying"
+    log "on this diagnostic to satisfy that check."
+  fi
  
   log "\n--- Health data ---"
   case "$STORAGE_TYPE" in
@@ -202,6 +262,11 @@ else
       log "  sudo nvme format $PRIMARY_DEV --ses=2"
       log "Fallback if crypto erase unsupported (user-data erase):"
       log "  sudo nvme format $PRIMARY_DEV --ses=1"
+      log "If both --ses=2/1 (and --ses=0) are rejected with 'Invalid Command"
+      log "Opcode' regardless of value, this may be the confirmed"
+      log "unsupported-firmware pattern in known-issues.md — erase-partition.sh"
+      log "detects this automatically and falls back to a documented Clear-tier"
+      log "overwrite (methodology.md §4.1); no separate action needed here."
       ;;
     "SATA SSD (non-rotational)")
       log "NOTE: methodology.md §4 only names the NVMe case explicitly. A SATA"
@@ -286,29 +351,33 @@ if [ "$STAGE" = "after" ]; then
   log "\n=== Reminder ==="
   log "Windows activation status CANNOT be checked from Ubuntu Live — it only"
   log "exists inside a booted Windows session. Verify manually (Settings >"
-  log "System > Activation) and record it in hardware-inventory.csv's"
-  log "windows_activation_verified column."
+  log "System > Activation) and record the result yourself — summary.csv has"
+  log "no dedicated column for it yet, so note it against this machine's"
+  log "CIAD number in whatever tracking you're keeping outside this script."
 fi
  
 # --- Machine-readable summary row ---------------------------------------------
 # Schema shared with erase-partition.sh (stage=erase rows). Diagnostic rows
-# (stage=before/after) leave the six erase-specific columns blank; only
-# erase-partition.sh populates them. One file, one schema, joinable by
-# serial_number across before/erase/after.
-EXPECTED_HEADER="serial_number,ciad_number,date_processed,stage,cpu_model,ram_gb,storage_type,storage_capacity_gb,smart_status,erase_method,erase_start,erase_end,erase_exit_status,verify_method,verify_result"
+# (stage=before/after) leave erase_method..verify_result blank; only
+# erase-partition.sh populates them. drive_serial (added in v0.5) is
+# populated by both scripts and is the field erase-partition.sh's
+# pre-sanitize cross-check matches on — NOT serial_number, which stays the
+# machine/chassis serial on rows written by this script.
+EXPECTED_HEADER="serial_number,ciad_number,date_processed,stage,cpu_model,ram_gb,storage_type,storage_capacity_gb,smart_status,erase_method,erase_start,erase_end,erase_exit_status,verify_method,verify_result,drive_serial"
  
 if [ ! -f "$SUMMARY_CSV" ]; then
   echo "$EXPECTED_HEADER" > "$SUMMARY_CSV"
 else
   CURRENT_HEADER=$(head -n1 "$SUMMARY_CSV")
-  if ! echo "$CURRENT_HEADER" | grep -q "erase_method"; then
-    log "WARNING: summary.csv still has the pre-v0.4 9-column header. Appending"
-    log "this row in the extended 15-column format anyway — existing rows won't"
-    log "have the new columns until the header is migrated by hand."
+  if ! echo "$CURRENT_HEADER" | grep -q "drive_serial"; then
+    log "WARNING: summary.csv still has the pre-v0.5 15-column header (no"
+    log "drive_serial). Appending this row in the 16-column format anyway —"
+    log "existing rows won't have drive_serial until their machines are"
+    log "re-diagnosed under this version. See known-issues.md."
   fi
 fi
  
-echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$(date -I)\",\"$STAGE\",\"$CPU_MODEL\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$SMART_STATUS\",\"\",\"\",\"\",\"\",\"\",\"\"" >> "$SUMMARY_CSV"
+echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$(date -I)\",\"$STAGE\",\"$CPU_MODEL\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$SMART_STATUS\",\"\",\"\",\"\",\"\",\"\",\"\",\"$DRIVE_SERIAL\"" >> "$SUMMARY_CSV"
  
 echo ""
 echo "Done."
@@ -316,4 +385,3 @@ echo "Full log       : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
 echo "Copy results off the Toolbox USB periodically — it's not permanent storage."
  
-
