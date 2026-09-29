@@ -18,5 +18,11 @@
 ## SATA SSD sanitization fallback
 - `methodology.md` §4.1's Clear-tier fallback (for NVMe drives confirmed to have no Purge-tier path) currently covers NVMe only. Whether a SATA SSD reporting `hdparm` secure-erase as unsupported, or FROZEN with no resolution, should get the same automatic fallback — or needs its own separate confirmation pass first — is undecided.
 
+## Activation failure
+- The product keys for this batch are embedded in each machine's BIOS, so Windows normally activates on its own once online. What to do when a machine still isn't activated after install (the `LicenseStatus` check in `toolkit-reference.md`'s Windows Update walkthrough doesn't read `1`) is undecided — e.g. how long to wait or which troubleshooting steps to try, who to escalate to, and whether the machine can still be handed off.
+
+## Proof of "activated and fully updated" in the deliverable
+- IT's requirement for this batch is Windows 11 activated and fully updated, but `summary.csv`'s GREEN status only means closing diagnostics found a Windows Boot Manager entry. Activation and update completion are checked by hand at the Windows console and not recorded anywhere, so `summary-combined.csv` can't show that any machine meets the requirement. Open: is a pre-handoff checklist tick enough for IT, or does the deliverable need columns for them (filled in by hand on the laptop before `combine-summary.sh`, or by a script later)? **Hamish is raising this with IT (2026-09-29)** — waiting on their answer.
+
 ## Printers and monitors
 - Explicitly deferred — no procedure exists yet, and none of the current documents address them. Revisit once the PC batch is underway.
