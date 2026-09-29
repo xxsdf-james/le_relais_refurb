@@ -69,6 +69,10 @@ this — it's kept for when that phase resumes.
    erase-partition.sh` — no sudo): sanitizes the drive (method by drive type,
    methodology.md §4), zaps any leftover GPT/MBR structure, leaves the disk fully
    unallocated. It does NOT partition or create an ESP — Windows Setup does that itself.
+   Then, before leaving this live session, pull its results (diag_before, erase log,
+   summary.csv) from the laptop with `scripts/laptop/pull-results.sh` — the Windows
+   install in step 5 wipes this session, and this summary.csv row is the one closing
+   diagnostics builds on in step 11.
 5. Boot Windows 11 USB → install to the unallocated space
 6. Set a real password on the local admin account (Rufus's online-account bypass — see
    "Building each Rufus USB" above — leaves it blank)
@@ -90,18 +94,21 @@ this — it's kept for when that phase resumes.
     11–12). Don't run `enable-ssh.ps1` on these machines for now, and skip
     `disable-ssh.ps1` in the pre-handoff checklist accordingly — there's nothing to
     disable if it was never enabled.
-11. Boot Ubuntu USB → Ubuntu Live again, fetch diagnostics.sh again, run it for closing
-    diagnostics (same machine label + "after"). This is a fresh live boot — the SSH
-    access enabled in step 3 doesn't carry over (no persisted host key or
-    `authorized_keys` — see docs/ssh-access.md), so enable-ssh.sh has to be fetched and
-    run again here too, before step 12 can connect. Exact commands: walkthrough below.
-12. Pull that machine's result files (diagnostic .txt logs, summary.csv) over SSH, from
-    the laptop via `scripts/laptop/pull-results.sh` — see docs/ssh-access.md — not a
+11. Boot Ubuntu USB → Ubuntu Live again. In this order: fetch and run enable-ssh.sh
+    (a fresh live boot — step 3's SSH access doesn't carry over, see
+    docs/ssh-access.md); push this machine's summary.csv back from the laptop with
+    `scripts/laptop/push-summary.sh`; THEN fetch and run diagnostics.sh for closing
+    diagnostics (same machine label + "after"). The push has to come first: without
+    the opening row in results/, diagnostics.sh inserts a fresh "before" row instead
+    of updating the existing one, and the machine never reaches GREEN. Exact
+    commands: walkthrough below.
+12. Pull that machine's result files (diag_after, summary.csv) over SSH, from the
+    laptop via `scripts/laptop/pull-results.sh` — see docs/ssh-access.md — not a
     physical USB. Exact commands: walkthrough below.
 13. Work through the pre-handoff checklist above before the machine leaves
 ```
 
-### Diagnostics + SSH stage — full walkthrough (steps 2–3, 11–12)
+### Diagnostics + SSH stage — full walkthrough (steps 2–4, 11–12)
 
 Concrete commands for the Ubuntu-Live diagnostics and SSH-results-pull portions of the
 workflow above — both the opening pass (steps 2–3) and the closing pass (steps 11–12)
@@ -122,24 +129,53 @@ sudo bash enable-ssh.sh <your-github-username>
 ```
 Prints the connect command (with this session's IP) at the end.
 
-*(Steps 4–10 — erase, Windows install, Windows Update — happen in between; see
-elsewhere in this workflow and the "Windows Update stage" walkthrough below.)*
+*(Step 4 — erase-partition.sh — runs here, same session.)*
 
-**Closing diagnostics (step 11), fresh Ubuntu Live boot:** repeat both commands above —
-same machine label, "after" instead of "before". This is a *new* live session with no
-memory of the opening one, so enable-ssh.sh has to run again too: its host key and
-`authorized_keys` from the opening pass don't persist across a reboot (see
-docs/ssh-access.md, "REMOTE HOST IDENTIFICATION HAS CHANGED").
-
-**Pull results (step 12), from the laptop:**
+**Pull opening results (end of step 4), from the laptop, before rebooting into the
+Windows installer:**
 ```
 scripts/laptop/pull-results.sh <target-ip> <machine-label>
 ```
 Handles the stale-host-key problem itself (`ssh-keygen -R` + `ssh-keyscan`,
-non-interactive) before pulling `diag_*.txt`, `erase_*.txt` (if present), and
-`summary.csv` into `<repo-parent>/le_relais_refurb_results/<machine-label>/` — see
-docs/ssh-access.md and `scripts/laptop/pull-results.sh`'s own usage text for the
-optional `remote-user`/`remote-results-dir` arguments.
+non-interactive) before pulling `diag_*.txt`, `erase_*.txt`, and `summary.csv` into
+`<repo-parent>/le_relais_refurb_results/<machine-label>/` — see docs/ssh-access.md and
+`scripts/laptop/pull-results.sh`'s own usage text for the optional
+`remote-user`/`remote-results-dir` arguments. Use the same `<machine-label>` for every
+pull and push of a given machine: it's the folder name, and one folder = one machine.
+
+*(Steps 5–10 — Windows install, Windows Update — happen in between; see the "Windows
+Update stage" walkthrough below.)*
+
+**Closing diagnostics (step 11), fresh Ubuntu Live boot — order matters:**
+
+1. Enable SSH — same enable-ssh.sh commands as step 3 above. This is a *new* live
+   session: the host key and `authorized_keys` from the opening pass don't persist
+   (docs/ssh-access.md, "REMOTE HOST IDENTIFICATION HAS CHANGED").
+2. From the laptop, push this machine's summary.csv back:
+   ```
+   scripts/laptop/push-summary.sh <target-ip> <machine-label>
+   ```
+   Typing the label is the confirmation of which file goes out; the script also
+   refuses unless the target's chassis serial matches that file's `machine_serial`
+   (catches a wrong IP), the file has exactly one row, and there's no summary.csv on
+   the target yet. It pushes to `~/results/`, so fetch diagnostics.sh into the home
+   directory in the next step (same as the opening pass).
+3. Fetch and run diagnostics.sh — same commands as step 2 above, "after" instead of
+   "before". It finds the pushed row and updates it in place: `windows_verified`, and
+   status → GREEN if the Windows Boot Manager check passes.
+
+**Pull closing results (step 12), from the laptop:** same `pull-results.sh` command as
+above. The existing `summary.csv` is copied to `summary.csv.<timestamp>.bak` first,
+then replaced by the closing copy (a superset of the opening one).
+
+**Building the single deliverable, from the laptop (once machines are done):**
+```
+scripts/laptop/combine-summary.sh
+```
+Stacks every `<machine-label>/summary.csv` into
+`le_relais_refurb_results/summary-combined.csv` — one header, one row per machine.
+Writes nothing and lists the problems if any machine's file has the wrong header or
+more/fewer than one row, or if the same `machine_serial` shows up under two labels.
 
 ### Windows Update stage — full walkthrough (steps 7–9, plus cleanup)
 

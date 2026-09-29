@@ -4,11 +4,12 @@
 # machines"). Pulls one machine's results/ (diag_*.txt + erase_*.txt +
 # summary.csv) from an Ubuntu Live session over SSH, per docs/ssh-access.md.
 #
-# Does NOT merge pulled summary.csv rows into a single master file across
-# machines/sessions — that merge strategy is still an open decision
-# (CLAUDE.md, "Open items"). Each pull is kept separate, under the source
-# machine's IP, so nothing is silently combined or overwritten until that's
-# settled.
+# summary.csv lands as <machine-label>/summary.csv. The closing session's
+# copy is a superset of the opening one (push-summary.sh sends the opening
+# row back before closing diagnostics), so a later pull replaces an earlier
+# one — but the existing file is first copied to a timestamped backup, in
+# case the push was skipped and the incoming copy is missing the erase
+# columns. combine-summary.sh stacks the per-machine files into one.
 
 set -euo pipefail
 
@@ -82,10 +83,15 @@ if ! scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/erase_*.tx
   echo "No erase_*.txt matched (fine if this pull is diagnostics-only, or that stage hasn't run yet)."
 fi
 
-SUMMARY_DEST="$LOCAL_DEST/summary.csv.${TARGET_IP}"
+SUMMARY_DEST="$LOCAL_DEST/summary.csv"
+if [ -f "$SUMMARY_DEST" ]; then
+  SUMMARY_BACKUP="$LOCAL_DEST/summary.csv.$(date +%Y%m%d-%H%M%S).bak"
+  cp -p "$SUMMARY_DEST" "$SUMMARY_BACKUP"
+  echo "Backed up existing summary.csv -> $SUMMARY_BACKUP"
+fi
 scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv" "$SUMMARY_DEST"
 
 echo ""
 echo "Done."
 echo "Logs        : $LOCAL_DEST (diag_*.txt and/or erase_*.txt, whichever stages have run)"
-echo "Summary rows: $SUMMARY_DEST (per-source-IP, not merged into a master file)"
+echo "Summary row : $SUMMARY_DEST"

@@ -20,8 +20,9 @@ running Windows 11 on unsupported hardware.
 ```
 scripts/linux/     diagnostics.sh, erase-partition.sh, enable-ssh.sh
 scripts/windows/   *.ps1 (update loop, etc.)
-scripts/laptop/    pull-results.sh — runs on the laptop, not a target machine; not
-                   part of the raw.githubusercontent.com delivery path above
+scripts/laptop/    pull-results.sh, push-summary.sh, combine-summary.sh — run on the
+                   laptop, not a target machine; not part of the
+                   raw.githubusercontent.com delivery path above
 docs/              methodology.md, known-issues.md, toolkit-reference.md, open-questions.md,
                    ssh-access.md
 tests/fixtures/    raw hardware output captured from real machines (001 NVMe, 002 SATA SSD)
@@ -116,9 +117,8 @@ Hamish publishes.
   is still open.
 - How activation keys reach Windows machines without being in this repo.
 - Internal asset-labeling scheme: unresolved at Le Relais. Don't invent one.
-- How to update/merge `summary.csv` across machines and sessions. Each live-boot session
-  starts with an empty `results/` dir, so opening diagnostics and closing diagnostics for
-  the same machine (separate ephemeral boots) each produce their own partial `summary.csv`
-  with no memory of the other. `scripts/laptop/pull-results.sh` pulls each session's copy
-  down separately (keyed by source IP) rather than guessing a merge strategy — Hamish's
-  call on how these get combined into one master record.
+- How to update/merge `summary.csv` across machines and sessions: RESOLVED (Hamish,
+  2026-09-29). One `summary.csv` per machine folder on the laptop; `push-summary.sh`
+  sends it back before closing diagnostics so the row is updated in place, and
+  `combine-summary.sh` stacks the per-machine files into the single deliverable. See
+  `docs/toolkit-reference.md`, steps 4 and 11–12.
