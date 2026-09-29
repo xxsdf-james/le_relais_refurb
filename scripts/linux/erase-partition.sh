@@ -908,11 +908,11 @@ fi
 # ============================================================================
 log "\n=== Recording result ==="
  
-EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date"
+EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date,windows_verified"
 CURRENT_HEADER=$(head -n1 "$SUMMARY_CSV")
 if [ "$CURRENT_HEADER" != "$EXPECTED_HEADER" ]; then
   log "WARNING: summary.csv's header doesn't match the current one-row-per-machine"
-  log "schema (machine_serial-keyed, 12 columns). §3 already matched a row against"
+  log "schema (machine_serial-keyed, 13 columns). §3 already matched a row against"
   log "it, so proceeding, but this file needs migrating to the current schema."
 fi
  
@@ -948,9 +948,10 @@ UPDATED=0
       OLD_SMART=$(echo "$row" | awk -F',' '{print $7}')
       OLD_OS_INSTALLED=$(echo "$row" | awk -F',' '{print $10}')
       OLD_STATUS=$(echo "$row" | awk -F',' '{print $11}')
+      OLD_WINDOWS_VERIFIED=$(echo "$row" | awk -F',' '{print $13}')
       FINAL_STATUS="$OLD_STATUS"
       [ -n "$NEW_STATUS" ] && FINAL_STATUS="\"$NEW_STATUS\""
-      echo "\"$SERIAL\",\"$CIAD_NUMBER\",$OLD_RAM,$OLD_STORAGE_TYPE,$OLD_STORAGE_CAP,$OLD_DRIVE_SERIAL,$OLD_SMART,\"$SAFE_ERASE_METHOD\",\"$NEW_ERASE_RESULT\",$OLD_OS_INSTALLED,$FINAL_STATUS,\"$(date -I)\""
+      echo "\"$SERIAL\",\"$CIAD_NUMBER\",$OLD_RAM,$OLD_STORAGE_TYPE,$OLD_STORAGE_CAP,$OLD_DRIVE_SERIAL,$OLD_SMART,\"$SAFE_ERASE_METHOD\",\"$NEW_ERASE_RESULT\",$OLD_OS_INSTALLED,$FINAL_STATUS,\"$(date -I)\",$OLD_WINDOWS_VERIFIED"
     else
       echo "$row"
     fi

@@ -383,9 +383,17 @@ have mokutil && mokutil --sb-state 2>&1 | tee -a "$OUT"
 # --- Windows Boot Manager presence check (most useful on 'after' runs) -------
 # v0.7: dropped the Linux/GRUB half of this check for the Windows-only batch
 # (see v0.7 changelog above) — no dual-boot in play for these machines.
+#
+# v0.8: this result now also drives the windows_verified column and the
+# GREEN status below (STAGE=after only) — see the summary.csv comment block
+# further down for why status is tied to this specific automated result
+# rather than just trusting that closing diagnostics was only run after a
+# manual pass.
 log "\n=== Windows Boot Manager Check ==="
+WINDOWS_BOOT_ENTRY_FOUND=0
 if [ -n "$BOOTMGR_OUT" ]; then
   if echo "$BOOTMGR_OUT" | grep -qi "windows boot manager"; then
+    WINDOWS_BOOT_ENTRY_FOUND=1
     log "Windows Boot Manager entry : FOUND"
   else
     log "Windows Boot Manager entry : NOT FOUND"
@@ -413,20 +421,28 @@ fi
 # serial — the source of truth per methodology.md §3), not one row per
 # stage. This script only owns and writes: machine_serial, ciad_number,
 # ram_gb, storage_type, storage_capacity_gb, drive_serial, smart_status,
-# date. It sets status="before" only when inserting a brand-new row — an
-# existing row's status (e.g. "erased", written by erase-partition.sh) is
-# never downgraded by a re-run of this script, which matters for the
-# legacy-row re-diagnosis case in known-issues.md. Columns owned by other
-# scripts (erase_method, erase_result, os_installed) are carried over
-# untouched on update, left blank on insert.
+# windows_verified, date. Columns owned by other scripts (erase_method,
+# erase_result, os_installed) are carried over untouched on update, left
+# blank on insert.
 #
-# NOTE: STAGE=after is still recorded in this machine's own .txt report as
-# always, but doesn't yet update anything in summary.csv beyond the columns
-# above — closing diagnostics gets its own dedicated columns once that
-# stage is actually built (deferred per the 2026-09-23 CSV redesign).
+# v0.8 — closing diagnostics (STAGE=after) now writes two things the opening
+# pass doesn't:
+#   - windows_verified: "verified" if the Windows Boot Manager Check above
+#     found an EFI entry, "not verified" if it didn't. Column is otherwise
+#     left untouched (blank on a fresh machine) — it only means anything
+#     once an after-run has actually happened.
+#   - status advances to GREEN, but ONLY when that same check passed. The
+#     workflow already calls for closing diagnostics to run after a manual
+#     Windows Update/activation check at the console (toolkit-reference.md,
+#     steps 8-9) — GREEN is not a substitute for that, it's confirmation
+#     that this automated signal agrees with it. If the boot-manager entry
+#     is missing on an after-run, status is deliberately NOT advanced (this
+#     is a real discrepancy worth investigating, not busywork) — same
+#     forward-only rule as every other status value here, so a bad after-run
+#     can't downgrade a GREEN a prior after-run already earned.
 log "\n=== Recording result ==="
- 
-EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date"
+
+EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date,windows_verified"
  
 if [ ! -f "$SUMMARY_CSV" ]; then
   echo "$EXPECTED_HEADER" > "$SUMMARY_CSV"
@@ -435,12 +451,12 @@ fi
 CURRENT_HEADER=$(head -n1 "$SUMMARY_CSV")
 if [ "$CURRENT_HEADER" != "$EXPECTED_HEADER" ]; then
   log "WARNING: summary.csv's header doesn't match the current one-row-per-machine"
-  log "schema (machine_serial-keyed, 12 columns). This usually means the file"
-  log "still has rows in the old one-row-per-stage format and needs migrating by"
-  log "hand — proceeding anyway rather than aborting a diagnostic run, but don't"
-  log "trust this upsert to have found the right row until that's done."
+  log "schema (machine_serial-keyed, 13 columns). This usually means the file"
+  log "still has rows in an older format and needs migrating by hand —"
+  log "proceeding anyway rather than aborting a diagnostic run, but don't trust"
+  log "this upsert to have found the right row until that's done."
 fi
- 
+
 TMP_CSV=$(mktemp)
 MATCHED=0
 {
@@ -456,20 +472,42 @@ MATCHED=0
       OLD_ERASE_RESULT=$(echo "$row" | awk -F',' '{print $9}')
       OLD_OS_INSTALLED=$(echo "$row" | awk -F',' '{print $10}')
       OLD_STATUS=$(echo "$row" | awk -F',' '{print $11}')
+      OLD_WINDOWS_VERIFIED=$(echo "$row" | awk -F',' '{print $13}')
       NEW_STATUS="$OLD_STATUS"
+      NEW_WINDOWS_VERIFIED="$OLD_WINDOWS_VERIFIED"
       STATUS_BARE=$(echo "$OLD_STATUS" | tr -d '"')
       # Only ever set to "before" if nothing further has been recorded yet —
       # never downgrade progress an erase/partition run already made.
       [ -z "$STATUS_BARE" ] && NEW_STATUS="\"before\""
-      echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$DRIVE_SERIAL\",\"$SMART_STATUS\",$OLD_ERASE_METHOD,$OLD_ERASE_RESULT,$OLD_OS_INSTALLED,$NEW_STATUS,\"$(date -I)\""
+      if [ "$STAGE" = "after" ]; then
+        if [ "$WINDOWS_BOOT_ENTRY_FOUND" -eq 1 ]; then
+          NEW_WINDOWS_VERIFIED="\"verified\""
+          NEW_STATUS="\"GREEN\""
+        else
+          NEW_WINDOWS_VERIFIED="\"not verified\""
+          log "WARNING: no Windows Boot Manager entry found on this closing run —"
+          log "status NOT advanced to GREEN. Investigate before treating $SERIAL"
+          log "(CIAD $CIAD_NUMBER) as ready for handoff."
+        fi
+      fi
+      echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$DRIVE_SERIAL\",\"$SMART_STATUS\",$OLD_ERASE_METHOD,$OLD_ERASE_RESULT,$OLD_OS_INSTALLED,$NEW_STATUS,\"$(date -I)\",$NEW_WINDOWS_VERIFIED"
     else
       echo "$row"
     fi
   done
 } < "$SUMMARY_CSV" > "$TMP_CSV"
- 
+
 if [ "$MATCHED" -eq 0 ]; then
-  echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$DRIVE_SERIAL\",\"$SMART_STATUS\",\"\",\"\",\"\",\"before\",\"$(date -I)\"" >> "$TMP_CSV"
+  INSERT_STATUS="\"before\""
+  INSERT_WINDOWS_VERIFIED="\"\""
+  if [ "$STAGE" = "after" ]; then
+    log "WARNING: closing diagnostics ran for $SERIAL (CIAD $CIAD_NUMBER) but no"
+    log "existing row was found — there's no 'before' baseline for this machine."
+    log "Inserting a row anyway, but status is left at \"before\" rather than"
+    log "GREEN: re-run opening diagnostics for this machine so there's an actual"
+    log "before/after comparison on record, per methodology.md §1.2."
+  fi
+  echo "\"$SERIAL\",\"$CIAD_NUMBER\",\"$RAM_GB\",\"$STORAGE_TYPE\",\"$STORAGE_CAPACITY_GB\",\"$DRIVE_SERIAL\",\"$SMART_STATUS\",\"\",\"\",\"\",$INSERT_STATUS,\"$(date -I)\",$INSERT_WINDOWS_VERIFIED" >> "$TMP_CSV"
   log "New machine — inserted row for $SERIAL (CIAD $CIAD_NUMBER)."
 else
   log "Existing machine — updated row for $SERIAL (CIAD $CIAD_NUMBER) in place."

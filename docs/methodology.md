@@ -74,7 +74,9 @@ Even without dedicated ITAD software, a usable per-machine record — the kind t
 | Technician | Manual note |
 | Disposition | Redeployed / resold / destroyed |
 
-**Current gap, not yet resolved:** `summary.csv`'s schema (`machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date`) covers the technical rows above but has no `technician` or `disposition` column — this table describes the target shape, not the current implementation. Worth a column addition or an explicit decision to keep those two out-of-band; not decided here (see §9).
+**Current gap, not yet resolved:** `summary.csv`'s schema (`machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date,windows_verified`) covers the technical rows above but has no `technician` or `disposition` column — this table describes the target shape, not the current implementation. Worth a column addition or an explicit decision to keep those two out-of-band; not decided here (see §9).
+
+`status` reaches its final value, `GREEN`, only when closing diagnostics (`diagnostics.sh`, STAGE=after) finds a Windows Boot Manager EFI entry — `windows_verified` records that same result (`verified`/`not verified`). This is an automated cross-check against the manual Windows Update/activation verification the workflow already calls for at the console before closing diagnostics runs (`toolkit-reference.md`, steps 8-9) — not a replacement for it. See "1.2 Why before/after diagnostics matter" above: the diff this enables is what makes `status=GREEN` meaningful, not the closing run in isolation.
 
 ## 4. Data sanitization, by drive type
 
