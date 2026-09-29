@@ -48,3 +48,24 @@ Each entry: **Symptom → Cause → Fix**, plus how broadly it's expected to app
 - **Applies to**: any machine that would have hit the SATA-SSD branch between v9's introduction and v10's revert (2026-09-28, same day — narrow window, but worth checking `erase_method` in any affected machine's `summary.csv` row if that window is uncertain). Machines sanitized with v1–v8's plain `--security-erase`, or v10 onward, are unaffected.
 
 ---
+
+## Windows Update stage
+
+### Files created under `C:\ProgramData\Refurb` don't inherit the folder's ACL — Access Denied reading them back, even from a fully elevated Administrator session
+- **Symptom**: `Get-Content` on `update-log.txt` or `update-status.txt`, and running `check-update-status.ps1` from its `C:\ProgramData\Refurb` copy, all fail with "L'accès au chemin d'accès ... est refusé" (`UnauthorizedAccessException` / `PermissionDenied`) — confirmed from a console where `([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)` returns `True`, so this isn't a missing-elevation mistake. `icacls` on the affected files shows either zero ACEs (file readable enough to list, but empty — deny-all) or, for a file the current account doesn't own, "Accès refusé" on the `icacls` query itself.
+- **Diagnosis trail** (2026-09-29, first real-hardware run of the v4 COM-API rewrite):
+  1. Confirmed elevation via the `WindowsPrincipal` check above — ruled out a non-elevated console before looking any further.
+  2. `icacls C:\ProgramData\Refurb` (the folder itself) correctly shows the two ACEs `register-update-loop.ps1` sets (`BUILTIN\Administrateurs:(OI)(CI)(F)`, `AUTORITE NT\Système:(OI)(CI)(F)`) — the folder's own ACL is exactly as intended.
+  3. Checked four files, each created by a different mechanism: `update-log.txt` (`Add-Content`), `update-pass-count.txt` (`Set-Content`), `update-status.txt` (write-to-`.tmp` then `Move-Item -Force` over the target), and `check-update-status.ps1` (`Copy-Item`, from `register-update-loop.ps1`). All four show the same empty-DACL symptom — this rules out any one cmdlet or write pattern as the cause. Something about files created inside this specific locked-down folder isn't inheriting its `(OI)(CI)` ACEs, independent of how they're written.
+  4. `takeown /F` on an affected file succeeds (the elevated account has `SeTakeOwnershipPrivilege`, which can seize ownership of an object regardless of its current DACL) and changes only the owner, not the DACL — re-running `icacls` afterward still showed zero ACEs. Confirms the DACL genuinely has no entries, not just entries this account can't read.
+- **Cause**: not confirmed. Newly created child objects should inherit a parent's `(OI)(CI)` ACEs automatically; that didn't happen here for any of the four write mechanisms tested. Leading but **unverified** guess: a security baseline/GPO on these machines forcing new objects not to inherit parent DACLs — not checked against actual policy, so treat as plausible, not settled (same standard as the nwipe `SIGUSR1` note above).
+- **What still worked despite this**: the `RefurbWindowsUpdate` scheduled task itself, running as SYSTEM, wrote correct state throughout (real driver/update results ended up in `update-log.txt`) — SYSTEM's own access to files it creates isn't gated the same way. The bug only blocks a *human* reading that state back afterward, which is exactly the "Windows Update stage — full walkthrough" step 3–4 verification in `toolkit-reference.md`.
+- **Fix (workaround, confirmed working)**: one recursive sweep of the whole folder, run once right after `register-update-loop.ps1` (before step 3's `check-update-status.ps1` call, which is itself one of the broken files):
+  ```
+  takeown /F C:\ProgramData\Refurb /R /D Y
+  icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
+  ```
+  `toolkit-reference.md`'s walkthrough now includes this step. A real fix belongs in `register-update-loop.ps1`/`update-loop.ps1` — explicitly re-applying ACLs to each file after creating it, rather than relying on inheritance that's demonstrably not propagating here — but that means cutting a new tag and re-verifying checksums batch-wide, so it hasn't been done yet.
+- **Applies to**: every machine that reaches the Windows Update stage under the current `register-update-loop.ps1`/`update-loop.ps1` (v4). Confirmed on one real machine so far, across four different file-creation mechanisms on that same machine — nothing in the diagnosis trail points to hardware- or machine-specific causes, so treat it as expected on every machine in this batch until a script fix lands.
+
+---

@@ -170,6 +170,17 @@ This copies the three scripts into `C:\ProgramData\Refurb`, registers the
 `RefurbWindowsUpdate` scheduled task, and starts pass 0. The machine drives itself from
 here, rebooting automatically between passes as needed — you can walk away.
 
+**Known bug — apply this fix now, before step 3**: files created under
+`C:\ProgramData\Refurb` don't inherit the folder's ACL, so reading any of them back
+later (even from a fully elevated Administrator session) fails with Access Denied —
+this includes `check-update-status.ps1` itself, the very thing step 3 asks you to run.
+See `known-issues.md`, "Windows Update stage" for the full diagnosis. One recursive
+sweep fixes the whole folder at once:
+```
+takeown /F C:\ProgramData\Refurb /R /D Y
+icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
+```
+
 **3. Check progress periodically, until VERDICT reads `OK - updates complete`:**
 
 ```
