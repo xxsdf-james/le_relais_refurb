@@ -1,7 +1,7 @@
 # Windows Update stage: design notes and manual recovery
 
 Scripts: `update-loop.ps1`, `register-update-loop.ps1`, `check-update-status.ps1`.
-Status: **built and logic-tested off-Windows only** (parsed with PowerShell 7.4; every exit path exercised against stubbed Windows cmdlets). Not yet run on a Le Relais machine. See "Verify on the next machine" at the bottom. This now includes the 2026-09-29 PSWindowsUpdate -> COM API rewrite below, which is *additionally* unverified against real hardware in its own right (the WUA COM sequence has been checked against Microsoft's own API docs and community examples, not run end-to-end yet).
+Status: logic-tested off-Windows (parsed with PowerShell 7.4; every exit path exercised against stubbed Windows cmdlets), then **first run on a real Le Relais machine 2026-09-29** (v4, COM-API version) — it installed real driver/OS updates (results in `update-log.txt`), and surfaced the `C:\ProgramData\Refurb` ACL bug (`known-issues.md`, "Windows Update stage"). The items under "Verify on the next machine" at the bottom were not individually ticked off on that run; treat them as still open.
 
 ## Fetching the scripts
 
@@ -125,9 +125,11 @@ Your observed install took about 6 min. A cumulative update on an old HDD machin
 
 ## Manual recovery procedure
 
-Always start with an **elevated** PowerShell:
+Always start with an **elevated** PowerShell. First re-apply the folder ACL — until the scripts fix it themselves, files in `C:\ProgramData\Refurb` can come back Access Denied even when elevated, which makes `check-update-status.ps1` misreport `NO STATUS FILE` and blocks the log reads below (`known-issues.md`, "Windows Update stage"):
 
 ```
+takeown /F C:\ProgramData\Refurb /R /D Y
+icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
 powershell -ExecutionPolicy Bypass -File C:\ProgramData\Refurb\check-update-status.ps1
 ```
 
@@ -144,7 +146,7 @@ It prints the status line, the task state and decoded `LastTaskResult`, the last
 | ERROR, died mid-run, reboot didn't happen | **Reboot.** The task is still enabled and retries on its own. |
 | Same ERROR again after a reboot | Re-run by hand (step 3) to watch it live. |
 | ABORTED (cap reached) | Look in the log for a KB that appears on every pass. Fix or hide it, then reset (step 4). |
-| TASK MISSING | Re-run `register-update-loop.ps1 -KeepState` from the USB. |
+| TASK MISSING | Re-run `register-update-loop.ps1 -KeepState` from the folder you fetched it into (re-fetch and re-verify it per "Fetching the scripts" above if it's gone). |
 
 **Step 3: re-run by hand.** Make sure it isn't already running (`(Get-ScheduledTask RefurbWindowsUpdate).State` should not be `Running`), then:
 
@@ -175,7 +177,7 @@ Restart-Computer
 6. The icacls lockdown doesn't break the task (the first pass running at all confirms this).
 
 ## Not built yet
-- **Hand-off cleanup** before a machine leaves: `Unregister-ScheduledTask RefurbWindowsUpdate`, remove `C:\ProgramData\Refurb`. (No module to decide about any more — nothing was installed.)
+- **Hand-off cleanup** as a script: done by hand for now, commands in `toolkit-reference.md`, "Windows Update stage — full walkthrough", step 5.
 - Chaining the later stages (the hook above).
 
 ## Side notes from the machine-2 log (for when steps 3–4 get scripted)
