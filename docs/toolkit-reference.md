@@ -72,7 +72,7 @@ this — it's kept for when that phase resumes.
    Then, before leaving this live session, pull its results (diag_before, erase log,
    summary.csv) from the laptop with `scripts/laptop/pull-results.sh` — the Windows
    install in step 5 wipes this session, and this summary.csv row is the one closing
-   diagnostics builds on in step 11.
+   diagnostics builds on in step 11. Exact commands: walkthrough below.
 5. Boot Windows 11 USB → install to the unallocated space
 6. ~~Set a real password on the local admin account~~ — **not applicable**: Le Relais IT
    confirmed (2026-09-29) the blank-password local admin account from Rufus's
@@ -86,7 +86,9 @@ this — it's kept for when that phase resumes.
 9. Verify Windows activation (see walkthrough below for the exact command — more
    reliable than Settings → System → Activation, which lagged confirmed API-level state
    in a real session, 2026-09-29). Read at the machine's own console — steps 8–9 aren't
-   pulled anywhere, they're checked in place.
+   pulled anywhere, they're checked in place. Then, still in Windows, remove the refurb
+   tooling (walkthrough step 5) — do it now so the pre-handoff checklist doesn't need
+   another Windows boot after closing diagnostics.
 10. ~~Fetch and run enable-ssh.ps1~~ — **currently skipped, batch-wide**: Windows-side SSH
     has open bugs, not yet root-caused/documented. Until that's fixed, Windows results
     (update-loop completion, activation) are verified manually at the console (steps
@@ -106,7 +108,7 @@ this — it's kept for when that phase resumes.
 12. Pull that machine's result files (diag_after, summary.csv) over SSH, from the
     laptop via `scripts/laptop/pull-results.sh` — see docs/ssh-access.md — not a
     physical USB. Exact commands: walkthrough below.
-13. Work through the pre-handoff checklist above before the machine leaves
+13. Work through the pre-handoff checklist below before the machine leaves
 ```
 
 ### Diagnostics + SSH stage — full walkthrough (steps 2–4, 11–12)
@@ -121,6 +123,13 @@ wget -O diagnostics.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_r
 sha256sum diagnostics.sh      # compare with the value in the Obsidian note
 bash diagnostics.sh           # no sudo — it escalates per-command internally
 ```
+Fetch it into the home directory (where the terminal opens) — `push-summary.sh`
+assumes `~/results/` in the closing pass. It prompts for:
+- **Machine ID/label** — use the same label you'll give `pull-results.sh`/
+  `push-summary.sh` later (it's the laptop folder name: one folder = one machine).
+- **CIAD number** — from the asset sticker.
+- **Stage** — `before` here, `after` in step 11. Anything else is refused and asked
+  again.
 
 **Enable SSH (step 3), same session:**
 ```
@@ -128,9 +137,41 @@ wget -O enable-ssh.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_re
 sha256sum enable-ssh.sh       # compare with the value in the Obsidian note
 sudo bash enable-ssh.sh <your-github-username>
 ```
-Prints the connect command (with this session's IP) at the end.
+Prints the connect command (with this session's IP) at the end. If an SSH connection
+or `scp` fails ("subsystem request failed", "REMOTE HOST IDENTIFICATION HAS CHANGED",
+"Host key verification failed"), see docs/ssh-access.md — each has its own section.
 
-*(Step 4 — erase-partition.sh — runs here, same session.)*
+**Sanitize the drive (step 4), same session, same directory as diagnostics.sh:**
+```
+wget -O erase-partition.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/erase-partition.sh
+sha256sum erase-partition.sh  # compare with the value in the Obsidian note
+bash erase-partition.sh       # no sudo — it escalates per-command internally
+```
+What to expect:
+- Prompts for **Machine ID/label** and **CIAD number** (same values as step 2), then
+  shows the detected drive and asks you to type the **last 4+ characters of its
+  serial**. That's the point of no return — check the model/capacity shown match
+  this machine before typing.
+- **Duration depends on the method it picks.** NVMe crypto-erase and SATA SSD secure
+  erase take seconds to minutes. An HDD, or an NVMe drive that falls back to the
+  Clear-tier overwrite, runs `nwipe` over the whole disk: can be hours, and prints
+  nothing between its start and end lines — that's normal, not a hang. To check
+  progress from a second terminal, see the "Manual progress check" comment block in
+  `erase-partition.sh` (reads `write_bytes` from `/proc/<pid>/io`).
+- If a previous run on this drive was interrupted after the erase or verify stage,
+  it offers to **resume** instead of re-erasing. Answer Y unless you have a reason to
+  re-sanitize.
+- **"Drive reports security state FROZEN"** (SATA SSD): nothing was erased. Suspend
+  the machine — top-right system menu → Power → Suspend — wake it with the power
+  button, then run `bash erase-partition.sh` again. Don't power-cycle instead: the
+  BIOS re-freezes the drive on every boot (see the script's v9 changelog).
+- Any other **ABORTED** message says what it found and what to do; nothing is erased
+  by an abort before the serial confirmation. For the ones with history — "no
+  matching 'before' row"/missing `drive_serial`, NVMe "Invalid Command Opcode",
+  verification failing after a secure erase — see known-issues.md, "Diagnostics /
+  erase workflow".
+- The end of the run prints `Erase status: exit=…, verify=…, partition=…`. All three
+  need to read success (`exit=0`, `verify=pass`, `partition=ok`) before moving on.
 
 **Pull opening results (end of step 4), from the laptop, before rebooting into the
 Windows installer:**
@@ -211,16 +252,21 @@ This copies the three scripts into `C:\ProgramData\Refurb`, registers the
 `RefurbWindowsUpdate` scheduled task, and starts pass 0. The machine drives itself from
 here, rebooting automatically between passes as needed — you can walk away.
 
-**Known bug — apply this fix now, before step 3**: files created under
-`C:\ProgramData\Refurb` don't inherit the folder's ACL, so reading any of them back
-later (even from a fully elevated Administrator session) fails with Access Denied —
-this includes `check-update-status.ps1` itself, the very thing step 3 asks you to run.
-See `known-issues.md`, "Windows Update stage" for the full diagnosis. One recursive
-sweep fixes the whole folder at once:
+**Known bug — run this fix before EVERY check in step 3 (and before reading any file
+in `C:\ProgramData\Refurb` by hand)**: files created under `C:\ProgramData\Refurb`
+don't inherit the folder's ACL, so reading any of them back (even from a fully
+elevated Administrator session) fails with Access Denied — this includes
+`check-update-status.ps1` itself. See `known-issues.md`, "Windows Update stage" for the
+full diagnosis. One recursive sweep fixes the whole folder at once:
 ```
 takeown /F C:\ProgramData\Refurb /R /D Y
 icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
 ```
+Why every time, not once: the update loop keeps creating new files after the sweep —
+`update-status.txt` is replaced with a fresh file on every state change, plus a new
+transcript each pass — and nothing yet confirms those inherit correctly. If they
+don't, `check-update-status.ps1` can't read the status file and misreports `NO STATUS
+FILE`. The sweep is harmless to repeat.
 
 **3. Check progress periodically, until VERDICT reads `OK - updates complete`:**
 
@@ -228,15 +274,19 @@ icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(
 powershell -ExecutionPolicy Bypass -File C:\ProgramData\Refurb\check-update-status.ps1
 ```
 
-If it instead reads `IN PROGRESS - INSTALLING for <N>h`, wait and check again later.
-Don't run other DISM/CBS-touching commands (`Add-WindowsCapability`,
-`Add-WindowsPackage`, etc.) on the same machine while this is active — they can
-lock-contend with the live install.
+If it reads `IN PROGRESS - ...`, wait and check again later. Don't run other
+DISM/CBS-touching commands (`Add-WindowsCapability`, `Add-WindowsPackage`, etc.) on the
+same machine while this is active — they can lock-contend with the live install.
+
+Any other verdict (`NEEDS HUMAN`, `DIED MID-RUN`, `REBOOT DID NOT HAPPEN`, `TASK
+MISSING`, `SUSPECT HUNG`, ...): follow `docs/update-loop-design-and-recovery.md`,
+"Manual recovery procedure" — most cases are just a reboot. `NO STATUS FILE` right
+after registering usually means the sweep above wasn't run first.
 
 **4. Once VERDICT is `OK - updates complete`, verify:**
 
 ```
-# Activation
+# Activation — checked by hand for now (no script does it yet; see Open items)
 (Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "PartialProductKey IS NOT NULL").LicenseStatus
 # 1 = licensed
 
@@ -259,7 +309,13 @@ Updates can install some items (Store/AppX packages especially) independently of
 `update-loop.ps1`, before the task ever runs — confirmed once (2026-09-29), not itself a
 failure.
 
-**5. Clean up the refurb tooling** — save anything you need from `update-log.txt`
+**If activation doesn't read `1`:** the product keys are embedded in these machines'
+BIOS, so activation normally happens on its own once online. There's no agreed
+procedure yet for when it doesn't — set the machine aside, note it, and ask; see
+`open-questions.md`, "Activation failure".
+
+**5. Clean up the refurb tooling — do this now, before leaving Windows for closing
+diagnostics (per-machine step 9)** — save anything you need from `update-log.txt`
 first, this can't be undone:
 
 ```
@@ -319,20 +375,23 @@ Before a machine leaves for its recipient:
   directly as a real security exposure (anyone with physical access gets unauthenticated
   admin) before being confirmed as deliberate IT policy rather than an oversight — noted
   here so a future session doesn't re-raise it as a gap.
-- [ ] **Verify Windows activation and that the Update stage reached DONE** — exact
-  commands in "Windows Update stage — full walkthrough" above (step 4). Don't trust
-  Settings → Windows Update / Activation as real-time truth — it lagged confirmed
-  API-level state in a real session (2026-09-29).
-- [ ] **Remove the refurb tooling from the machine** — exact commands in "Windows
-  Update stage — full walkthrough" above (step 5). Save anything you need from
-  `update-log.txt` first, this can't be undone.
+- [ ] **Windows activation verified and the Update stage reached DONE** — done in
+  Windows at per-machine step 9 (commands: "Windows Update stage — full walkthrough"
+  above, step 4). Here, just confirm it was done — not by Settings → Windows Update /
+  Activation, which lagged confirmed API-level state in a real session (2026-09-29).
+- [ ] **Refurb tooling removed from the machine** — also done at step 9 (walkthrough
+  step 5), so no extra Windows boot is needed after closing diagnostics.
+- [ ] **Closing pull showed status GREEN** with no warnings from `pull-results.sh`.
 
 ## Open items / TODO
 
 - `diagnostics.sh` v0.7 now does drive-type detection, machine-identity fields
   (chassis + drive serial, CIAD number), and Windows Boot Manager verification — the
-  rewrite this item used to describe is mostly done. Windows activation check is the
-  one piece still missing (no script checks it; see the pre-handoff checklist above).
+  rewrite this item used to describe is mostly done. Windows activation can't be
+  checked from Ubuntu Live; it's checked by hand at the Windows console with the
+  `Get-CimInstance ... LicenseStatus` one-liner (Windows Update walkthrough, step 4).
+  Possible improvement, not scheduled: fold that check into the Windows scripts
+  (e.g. `check-update-status.ps1`).
   Dual-boot suitability evaluation was dropped from the script for the current
   Windows-only batch (see diagnostics.sh's own v0.7 changelog) — needs reinstating when
   the dual-boot phase resumes, not re-derived from scratch.
