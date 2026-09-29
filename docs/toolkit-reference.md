@@ -35,7 +35,7 @@ The **Toolbox USB is retired** (CLAUDE.md, "Out of scope / superseded") — scri
 
 The Toolbox USB is retired. Scripts are fetched directly on the target machine from
 this repo via `raw.githubusercontent.com`, pinned to a tag, and checked against a
-SHA-256 value printed on a card — see CLAUDE.md, "Delivery to target machines," for
+SHA-256 value kept in Hamish's Obsidian note — see CLAUDE.md, "Delivery to target machines," for
 the exact `wget`/`sha256sum` (Linux) and `Invoke-WebRequest`/`Get-FileHash` (Windows)
 commands. Diagnostic/erase results and logs leave the machine over SSH instead of a
 physical USB — see `docs/ssh-access.md`.

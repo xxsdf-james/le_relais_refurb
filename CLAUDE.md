@@ -74,20 +74,20 @@ don't trust (confirmed for powershellgallery.com and gist.githubusercontent.com)
 `github.com` and `raw.githubusercontent.com` pass through untouched (confirmed 2026-09-28).
 
 Scripts are fetched from this repo via `raw.githubusercontent.com`, pinned to a tag, and
-checked against a SHA-256 value printed on a card that Hamish carries. Never pipe a
+checked against a SHA-256 value Hamish keeps in an Obsidian note. Never pipe a
 download into a shell.
 
 ```
 # Linux live session
 wget -O diagnostics.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/diagnostics.sh
-sha256sum diagnostics.sh      # compare with the printed card, then:
+sha256sum diagnostics.sh      # compare with the value in the Obsidian note, then:
 sudo bash diagnostics.sh
 ```
 
 ```
 # Windows (built-in PowerShell 5.1)
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/<file>.ps1 -OutFile <file>.ps1
-Get-FileHash <file>.ps1 -Algorithm SHA256    # compare with the printed card
+Get-FileHash <file>.ps1 -Algorithm SHA256    # compare with the value in the Obsidian note
 powershell -ExecutionPolicy Bypass -File .\<file>.ps1
 ```
 

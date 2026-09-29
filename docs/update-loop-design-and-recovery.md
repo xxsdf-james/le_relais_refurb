@@ -12,7 +12,7 @@ individually per CLAUDE.md's "Delivery to target machines", into the same folder
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/register-update-loop.ps1 -OutFile register-update-loop.ps1
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/update-loop.ps1 -OutFile update-loop.ps1
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/check-update-status.ps1 -OutFile check-update-status.ps1
-Get-FileHash *.ps1 -Algorithm SHA256   # compare against the printed card
+Get-FileHash *.ps1 -Algorithm SHA256   # compare against the value in the Obsidian note
 ```
 
 No module to fetch alongside them any more (see "PSWindowsUpdate -> COM API" below). Per machine, from an elevated Windows PowerShell in that same folder:
