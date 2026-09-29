@@ -84,6 +84,7 @@ if ! scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/erase_*.tx
 fi
 
 SUMMARY_DEST="$LOCAL_DEST/summary.csv"
+SUMMARY_BACKUP=""
 if [ -f "$SUMMARY_DEST" ]; then
   SUMMARY_BACKUP="$LOCAL_DEST/summary.csv.$(date +%Y%m%d-%H%M%S).bak"
   cp -p "$SUMMARY_DEST" "$SUMMARY_BACKUP"
@@ -91,7 +92,31 @@ if [ -f "$SUMMARY_DEST" ]; then
 fi
 scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv" "$SUMMARY_DEST"
 
+# Warnings only — the pull itself has already succeeded. Status column 11,
+# windows_verified column 13 (same positions diagnostics.sh writes).
+ROW=$(sed -n 2p "$SUMMARY_DEST")
+ROW_STATUS=$(echo "$ROW" | awk -F',' '{print $11}' | tr -d '"')
+ROW_WINDOWS_VERIFIED=$(echo "$ROW" | awk -F',' '{print $13}' | tr -d '"')
+
 echo ""
 echo "Done."
 echo "Logs        : $LOCAL_DEST (diag_*.txt and/or erase_*.txt, whichever stages have run)"
 echo "Summary row : $SUMMARY_DEST"
+echo "Status      : ${ROW_STATUS:-<blank>} (windows_verified: ${ROW_WINDOWS_VERIFIED:-<blank>})"
+
+# Pulled copy identical to the one it replaced: nothing on the target updated
+# the row since the last pull — e.g. push-summary.sh ran but closing
+# diagnostics didn't (confirmed 2026-09-29 on CIAD7483).
+if [ -n "$SUMMARY_BACKUP" ] && cmp -s "$SUMMARY_DEST" "$SUMMARY_BACKUP"; then
+  echo ""
+  echo "WARNING: summary.csv is unchanged since the last pull — did the script for"
+  echo "this stage (diagnostics.sh / erase-partition.sh) actually run on the target?"
+fi
+
+# Closing diagnostics ran but didn't reach GREEN: the Windows Boot Manager
+# check failed (see that diag_*_after.txt). Catch it while still in the session.
+if compgen -G "$LOCAL_DEST/diag_*_after.txt" >/dev/null && [ "$ROW_STATUS" != "GREEN" ]; then
+  echo ""
+  echo "WARNING: a closing-diagnostics log is present but status is not GREEN —"
+  echo "check the Windows Boot Manager section of diag_*_after.txt before handoff."
+fi

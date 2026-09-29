@@ -166,7 +166,11 @@ Update stage" walkthrough below.)*
 
 **Pull closing results (step 12), from the laptop:** same `pull-results.sh` command as
 above. The existing `summary.csv` is copied to `summary.csv.<timestamp>.bak` first,
-then replaced by the closing copy (a superset of the opening one).
+then replaced by the closing copy (a superset of the opening one). It prints the row's
+status at the end, and warns (without failing) if the pulled copy is identical to the
+one it replaced — i.e. closing diagnostics didn't run after the push — or if a
+`diag_*_after.txt` is present but status isn't GREEN. Either warning means: fix it now,
+while that live session is still up.
 
 **Building the single deliverable, from the laptop (once machines are done):**
 ```
