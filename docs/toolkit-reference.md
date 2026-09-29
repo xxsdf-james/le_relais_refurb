@@ -72,10 +72,13 @@ this — it's kept for when that phase resumes.
    "Building each Rufus USB" above — leaves it blank)
 7. Fetch register-update-loop.ps1, update-loop.ps1, check-update-status.ps1, verify
    checksums, run register-update-loop.ps1 elevated. It registers the Windows Update
-   automation and the machine drives itself from there.
-8. Periodically run check-update-status.ps1 (elevated) until it verdicts OK
-9. Verify Windows activation manually (Settings → System → Activation) — no script
-   checks this yet
+   automation and the machine drives itself from there. Exact commands: "Windows Update
+   stage — full walkthrough" below.
+8. Periodically run check-update-status.ps1 (elevated) until it verdicts OK — see
+   walkthrough below.
+9. Verify Windows activation (see walkthrough below for the exact command — more
+   reliable than Settings → System → Activation, which lagged confirmed API-level state
+   in a real session, 2026-09-29).
 10. Fetch and run enable-ssh.ps1 — same as step 3: always done, not conditional, for the
     results pull and summary.csv update
 11. Boot Ubuntu USB → Ubuntu Live again, fetch diagnostics.sh again, run it for closing
@@ -84,6 +87,84 @@ this — it's kept for when that phase resumes.
     docs/ssh-access.md — not a physical USB
 13. Work through the pre-handoff checklist above before the machine leaves
 ```
+
+### Windows Update stage — full walkthrough (steps 7–9, plus cleanup)
+
+Concrete commands for the fetch → register → poll → verify → clean-up portion of the
+workflow above, confirmed against the first real-hardware run of the v4 COM-API rewrite
+(2026-09-29). Run all of this from an elevated Windows PowerShell console, staying in the
+same folder throughout (wherever the console starts — e.g. `C:\Users\Admin`).
+
+**1. Fetch the three scripts, pinned to a tag, and verify checksums** (see CLAUDE.md,
+"Delivery to target machines" — never pipe a download into a shell):
+
+```
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/register-update-loop.ps1 -OutFile register-update-loop.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/update-loop.ps1 -OutFile update-loop.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/check-update-status.ps1 -OutFile check-update-status.ps1
+Get-FileHash *.ps1 -Algorithm SHA256
+```
+
+Compare each hash against the value in the Obsidian note before running anything.
+
+**2. Register and start the update loop:**
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File .\register-update-loop.ps1
+```
+
+This copies the three scripts into `C:\ProgramData\Refurb`, registers the
+`RefurbWindowsUpdate` scheduled task, and starts pass 0. The machine drives itself from
+here, rebooting automatically between passes as needed — you can walk away.
+
+**3. Check progress periodically, until VERDICT reads `OK - updates complete`:**
+
+```
+powershell -ExecutionPolicy Bypass -File C:\ProgramData\Refurb\check-update-status.ps1
+```
+
+If it instead reads `IN PROGRESS - INSTALLING for <N>h`, wait and check again later.
+Don't run other DISM/CBS-touching commands (`Add-WindowsCapability`,
+`Add-WindowsPackage`, etc.) on the same machine while this is active — they can
+lock-contend with the live install.
+
+**4. Once VERDICT is `OK - updates complete`, verify:**
+
+```
+# Activation
+(Get-CimInstance -ClassName SoftwareLicensingProduct -Filter "PartialProductKey IS NOT NULL").LicenseStatus
+# 1 = licensed
+
+# Task completed cleanly and turned itself off
+Get-ScheduledTaskInfo -TaskName RefurbWindowsUpdate                    # LastTaskResult should be 0
+Get-ScheduledTask -TaskName RefurbWindowsUpdate | Select-Object State  # should read Disabled
+
+# Every installed update looks sane
+Get-Content C:\ProgramData\Refurb\update-log.txt | Select-String "result:"
+
+# Cross-check against Windows' own update history
+(New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().QueryHistory(0,50) |
+    Select-Object Title, ResultCode, Date
+```
+
+Don't trust Settings → Windows Update as real-time truth for any of this — it lagged
+confirmed API-level state in this session. The update-history count can legitimately
+come out higher than `update-log.txt`'s own count: Windows' own default Automatic
+Updates can install some items (Store/AppX packages especially) independently of
+`update-loop.ps1`, before the task ever runs — confirmed once (2026-09-29), not itself a
+failure.
+
+**5. Clean up the refurb tooling** — save anything you need from `update-log.txt`
+first, this can't be undone:
+
+```
+Unregister-ScheduledTask -TaskName "RefurbWindowsUpdate" -Confirm:$false -ErrorAction SilentlyContinue
+Remove-Item -Path "C:\ProgramData\Refurb" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "$env:USERPROFILE\*.ps1" -Force -ErrorAction SilentlyContinue
+```
+
+Doesn't touch Windows Event Logs or PowerShell history — only removes what this project
+put on the machine, not the system's own normal operational record.
 
 ## Dual-boot / Mint workflow (deferred — not part of the current batch)
 
@@ -125,15 +206,19 @@ Before a machine leaves for its recipient:
   reinstalled regardless), this OpenSSH server persists on the actual install —
   skipping it leaves a remotely-reachable SSH server trusting a technician's personal
   key for admin access on someone's low-budget PC. See `docs/ssh-access.md`.
-- [ ] **Set a real password on the local admin account.** The Rufus bypass used to
-  skip the online-Microsoft-account requirement (see "Building each Rufus USB" above)
-  creates a blank-password local admin account. (Note: this doc's own line above cites
-  `known-issues.md` for the detail on this — that entry doesn't actually exist there;
-  broken cross-reference, not re-derived here.)
-- [ ] **Verify Windows activation** (Settings → System → Activation). No script checks
-  this yet — see "Open items / TODO" below.
-- [ ] **Confirm the Windows Update stage reached DONE**, via `check-update-status.ps1`
-  (`scripts/windows/`), rather than assuming a quiet machine is finished.
+- [ ] ~~Set a real password on the local admin account~~ — **not applicable, per Le
+  Relais IT (confirmed 2026-09-29):** this batch is delivered with the Rufus-bypass
+  blank-password local admin account left as-is, intentionally. This was flagged
+  directly as a real security exposure (anyone with physical access gets unauthenticated
+  admin) before being confirmed as deliberate IT policy rather than an oversight — noted
+  here so a future session doesn't re-raise it as a gap.
+- [ ] **Verify Windows activation and that the Update stage reached DONE** — exact
+  commands in "Windows Update stage — full walkthrough" above (step 4). Don't trust
+  Settings → Windows Update / Activation as real-time truth — it lagged confirmed
+  API-level state in a real session (2026-09-29).
+- [ ] **Remove the refurb tooling from the machine** — exact commands in "Windows
+  Update stage — full walkthrough" above (step 5). Save anything you need from
+  `update-log.txt` first, this can't be undone.
 
 ## Open items / TODO
 
