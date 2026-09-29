@@ -19,7 +19,7 @@ The **Toolbox USB is retired** (CLAUDE.md, "Out of scope / superseded") — scri
 1. Download the correct ISO (see below for sources).
 2. Open Rufus, select the target USB, select the ISO.
 3. Partition scheme: **GPT**, target: **UEFI (non-CSM)**.
-4. For the Windows 11 USB specifically: use Rufus's extended Windows 11 install options to bypass the online-Microsoft-account requirement — but see `known-issues.md` regarding the blank-password local admin account this creates, and set a real password immediately after every install.
+4. For the Windows 11 USB specifically: use Rufus's extended Windows 11 install options to bypass the online-Microsoft-account requirement — this leaves the local admin account with a blank password, which Le Relais IT has confirmed is intended for this batch (see the pre-handoff checklist below).
 5. Rufus's "UEFI:NTFS" / media-validation option is **deliberately left off**. Integrity is instead checked periodically by hashing a key file on each USB and re-verifying every 15-20 installs:
    - Windows: `certutil -hashfile E:\sources\install.wim SHA256`
    - Mint: `certutil -hashfile E:\casper\filesystem.squashfs SHA256`
@@ -74,8 +74,9 @@ this — it's kept for when that phase resumes.
    install in step 5 wipes this session, and this summary.csv row is the one closing
    diagnostics builds on in step 11.
 5. Boot Windows 11 USB → install to the unallocated space
-6. Set a real password on the local admin account (Rufus's online-account bypass — see
-   "Building each Rufus USB" above — leaves it blank)
+6. ~~Set a real password on the local admin account~~ — **not applicable**: Le Relais IT
+   confirmed (2026-09-29) the blank-password local admin account from Rufus's
+   online-account bypass is left as-is for this batch. See the pre-handoff checklist.
 7. Fetch register-update-loop.ps1, update-loop.ps1, check-update-status.ps1, verify
    checksums, run register-update-loop.ps1 elevated. It registers the Windows Update
    automation and the machine drives itself from there. Exact commands: "Windows Update
