@@ -40,14 +40,20 @@ access — no separate credential distribution needed.
 
 ## Per machine — Linux (Ubuntu Live)
 
-On the target, from the live session:
+On the target, from the live session — fetch, verify, run (CLAUDE.md, "Delivery to
+target machines"):
 ```
-sudo bash scripts/linux/enable-ssh.sh <your-github-username>
+wget -O enable-ssh.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/enable-ssh.sh
+sha256sum enable-ssh.sh      # compare with the value in the Obsidian note
+sudo bash enable-ssh.sh <your-github-username>
 ```
-(fetched via the usual delivery path once this repo is public; for now,
-copy it over some other way). It installs `openssh-server`, writes your
-key into the live user's `authorized_keys`, and starts `ssh`. It prints the
-connect command at the end.
+It installs `openssh-server`, writes your key into the live user's `authorized_keys`,
+and starts `ssh`. It prints the connect command at the end.
+
+Each Ubuntu Live boot is a fresh session with no memory of a previous one — running
+this during opening diagnostics doesn't carry over to the closing-diagnostics boot
+later. Run it again on that second boot too (see `toolkit-reference.md`'s per-machine
+workflow, steps 2–3 and 11–12).
 
 From the laptop:
 ```
@@ -60,8 +66,11 @@ and the drive gets wiped and reinstalled regardless.
 
 ## Per machine — Windows
 
-In an elevated PowerShell prompt on the target:
+Fetch, verify, run, in an elevated PowerShell prompt on the target (CLAUDE.md,
+"Delivery to target machines"):
 ```
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/enable-ssh.ps1 -OutFile enable-ssh.ps1
+Get-FileHash enable-ssh.ps1 -Algorithm SHA256    # compare with the value in the Obsidian note
 powershell -ExecutionPolicy Bypass -File .\enable-ssh.ps1 <your-github-username>
 ```
 

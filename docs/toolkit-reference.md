@@ -58,10 +58,12 @@ this — it's kept for when that phase resumes.
 ```
 1. Boot Ubuntu USB → Ubuntu Live
 2. Fetch diagnostics.sh, verify its SHA-256, run it (`bash diagnostics.sh` — no sudo,
-   it escalates per-command internally) → opening diagnostics: machine label + "before"
+   it escalates per-command internally) → opening diagnostics: machine label + "before".
+   Exact commands: "Diagnostics + SSH stage — full walkthrough" below.
 3. Fetch and run enable-ssh.sh (`sudo bash enable-ssh.sh <github-username>`) — see
    docs/ssh-access.md. Always done, not just for ad hoc bench access: results are pulled
-   and `summary.csv` updated over SSH on every machine in this batch.
+   and `summary.csv` updated over SSH on every machine in this batch. Exact commands:
+   walkthrough below.
 4. Fetch erase-partition.sh into the SAME directory as diagnostics.sh (both resolve
    results/ relative to themselves), verify its SHA-256, run it (`bash
    erase-partition.sh` — no sudo): sanitizes the drive (method by drive type,
@@ -78,15 +80,66 @@ this — it's kept for when that phase resumes.
    walkthrough below.
 9. Verify Windows activation (see walkthrough below for the exact command — more
    reliable than Settings → System → Activation, which lagged confirmed API-level state
-   in a real session, 2026-09-29).
-10. Fetch and run enable-ssh.ps1 — same as step 3: always done, not conditional, for the
-    results pull and summary.csv update
+   in a real session, 2026-09-29). Read at the machine's own console — steps 8–9 aren't
+   pulled anywhere, they're checked in place.
+10. ~~Fetch and run enable-ssh.ps1~~ — **currently skipped, batch-wide**: Windows-side SSH
+    has open bugs, not yet root-caused/documented. Until that's fixed, Windows results
+    (update-loop completion, activation) are verified manually at the console (steps
+    8–9) rather than pulled over SSH; the only diagnostic file that leaves the machine
+    over SSH is `diag_after`, from the Ubuntu Live closing-diagnostics boot (steps
+    11–12). Don't run `enable-ssh.ps1` on these machines for now, and skip
+    `disable-ssh.ps1` in the pre-handoff checklist accordingly — there's nothing to
+    disable if it was never enabled.
 11. Boot Ubuntu USB → Ubuntu Live again, fetch diagnostics.sh again, run it for closing
-    diagnostics (same machine label + "after")
-12. Pull that machine's result files (diagnostic .txt logs, summary.csv) over SSH — see
-    docs/ssh-access.md — not a physical USB
+    diagnostics (same machine label + "after"). This is a fresh live boot — the SSH
+    access enabled in step 3 doesn't carry over (no persisted host key or
+    `authorized_keys` — see docs/ssh-access.md), so enable-ssh.sh has to be fetched and
+    run again here too, before step 12 can connect. Exact commands: walkthrough below.
+12. Pull that machine's result files (diagnostic .txt logs, summary.csv) over SSH, from
+    the laptop via `scripts/laptop/pull-results.sh` — see docs/ssh-access.md — not a
+    physical USB. Exact commands: walkthrough below.
 13. Work through the pre-handoff checklist above before the machine leaves
 ```
+
+### Diagnostics + SSH stage — full walkthrough (steps 2–3, 11–12)
+
+Concrete commands for the Ubuntu-Live diagnostics and SSH-results-pull portions of the
+workflow above — both the opening pass (steps 2–3) and the closing pass (steps 11–12)
+use the same fetch → verify → run pattern (CLAUDE.md, "Delivery to target machines").
+
+**Opening diagnostics (step 2), from the Ubuntu Live session:**
+```
+wget -O diagnostics.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/diagnostics.sh
+sha256sum diagnostics.sh      # compare with the value in the Obsidian note
+bash diagnostics.sh           # no sudo — it escalates per-command internally
+```
+
+**Enable SSH (step 3), same session:**
+```
+wget -O enable-ssh.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/enable-ssh.sh
+sha256sum enable-ssh.sh       # compare with the value in the Obsidian note
+sudo bash enable-ssh.sh <your-github-username>
+```
+Prints the connect command (with this session's IP) at the end.
+
+*(Steps 4–10 — erase, Windows install, Windows Update — happen in between; see
+elsewhere in this workflow and the "Windows Update stage" walkthrough below.)*
+
+**Closing diagnostics (step 11), fresh Ubuntu Live boot:** repeat both commands above —
+same machine label, "after" instead of "before". This is a *new* live session with no
+memory of the opening one, so enable-ssh.sh has to run again too: its host key and
+`authorized_keys` from the opening pass don't persist across a reboot (see
+docs/ssh-access.md, "REMOTE HOST IDENTIFICATION HAS CHANGED").
+
+**Pull results (step 12), from the laptop:**
+```
+scripts/laptop/pull-results.sh <target-ip> <machine-label>
+```
+Handles the stale-host-key problem itself (`ssh-keygen -R` + `ssh-keyscan`,
+non-interactive) before pulling `diag_*.txt`, `erase_*.txt` (if present), and
+`summary.csv` into `<repo-parent>/le_relais_refurb_results/<machine-label>/` — see
+docs/ssh-access.md and `scripts/laptop/pull-results.sh`'s own usage text for the
+optional `remote-user`/`remote-results-dir` arguments.
 
 ### Windows Update stage — full walkthrough (steps 7–9, plus cleanup)
 
@@ -205,7 +258,9 @@ Before a machine leaves for its recipient:
   machine. Mandatory, not optional: unlike the Linux live session (wiped and
   reinstalled regardless), this OpenSSH server persists on the actual install —
   skipping it leaves a remotely-reachable SSH server trusting a technician's personal
-  key for admin access on someone's low-budget PC. See `docs/ssh-access.md`.
+  key for admin access on someone's low-budget PC. See `docs/ssh-access.md`. Currently
+  a no-op for this batch — step 10 above has `enable-ssh.ps1` skipped batch-wide (open
+  bugs), so there's nothing to disable unless it was run ad hoc for troubleshooting.
 - [ ] ~~Set a real password on the local admin account~~ — **not applicable, per Le
   Relais IT (confirmed 2026-09-29):** this batch is delivered with the Rufus-bypass
   blank-password local admin account left as-is, intentionally. This was flagged
