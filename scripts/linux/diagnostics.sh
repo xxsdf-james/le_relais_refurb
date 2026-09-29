@@ -6,7 +6,22 @@
 # used to describe is retired, see CLAUDE.md "Out of scope / superseded").
 # Assesses hardware condition and drive type. Does NOT wipe a disk, install
 # anything, or verify Windows activation — those stay outside this script's
-# scope (see comments below for why).
+# scope (activation only exists inside a booted Windows session; it's checked
+# there, see toolkit-reference.md).
+#
+# v0.9 changes (2026-09-29):
+#   - Stage prompt now only accepts before/after (case-insensitive) and asks
+#     again otherwise. Previously "After" (or any typo) was taken as-is: the
+#     after-run logic never fired, so status never reached GREEN, and the log
+#     was named diag_*_After.txt, which pull-results.sh's not-GREEN warning
+#     (a case-sensitive diag_*_after.txt match) never saw either.
+#   - Dropped the STAGE=after "Windows activation reminder" block. It dated
+#     from when activation was checked in Settings; that GUI lags the real
+#     state, and activation is now checked at the console with the
+#     Get-CimInstance one-liner in toolkit-reference.md's Windows Update
+#     walkthrough.
+#   - End-of-run message points at scripts/laptop/pull-results.sh instead
+#     of a hand-typed scp.
 #
 # v0.7 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with erase-partition.sh v8):
@@ -115,8 +130,15 @@ mkdir -p "$RESULTS_DIR"
  
 read -rp "Machine ID/label: " MACHINE_ID
 read -rp "CIAD number (manual entry, traceability to legacy tracking): " CIAD_NUMBER
-read -rp "Stage (before/after): " STAGE
- 
+while :; do
+  read -rp "Stage (before/after): " STAGE || exit 1
+  STAGE="${STAGE,,}"
+  case "$STAGE" in
+    before|after) break ;;
+    *) echo "Type 'before' or 'after'." ;;
+  esac
+done
+
 OUT="$RESULTS_DIR/diag_${MACHINE_ID}_${CIAD_NUMBER}_${STAGE}.txt"
 SUMMARY_CSV="$RESULTS_DIR/summary.csv"
  
@@ -405,17 +427,7 @@ fi
 # v0.7: dropped the "Hardware Suitability Specs" recap block that supported a
 # manual per-machine dual-boot/Windows-only/Mint-only decision — see v0.7
 # changelog above. RAM/storage/UEFI are already logged individually above.
- 
-# --- Windows activation reminder (out of scope for this script) -------------
-if [ "$STAGE" = "after" ]; then
-  log "\n=== Reminder ==="
-  log "Windows activation status CANNOT be checked from Ubuntu Live — it only"
-  log "exists inside a booted Windows session. Verify manually (Settings >"
-  log "System > Activation) and record the result yourself — summary.csv has"
-  log "no dedicated column for it yet, so note it against this machine's"
-  log "CIAD number in whatever tracking you're keeping outside this script."
-fi
- 
+
 # --- Machine-readable summary — upsert one row per machine -------------------
 # summary.csv is now ONE ROW PER MACHINE, keyed on machine_serial (chassis
 # serial — the source of truth per methodology.md §3), not one row per
@@ -530,8 +542,6 @@ echo ""
 echo "Done."
 echo "Full log       : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
-echo "This live session is not permanent storage — pull these off via SSH once"
-echo "enable-ssh.sh has been run on this machine (see docs/ssh-access.md), e.g."
-echo "from the laptop:"
-echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$OUT ."
-echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$SUMMARY_CSV ."
+echo "This live session is not permanent storage — once enable-ssh.sh has been"
+echo "run on this machine, pull these from the laptop (docs/toolkit-reference.md):"
+echo "  scripts/laptop/pull-results.sh <this-machine-ip> <machine-label>"

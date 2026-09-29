@@ -73,6 +73,12 @@
 #   - The suspend-to-RAM frozen-state fix from v9 is unaffected and stays —
 #     it's independently confirmed and unrelated to this bug.
 #
+# v11 changes (2026-09-29, messages only — no change to erase logic):
+#   - FROZEN die() message now says how to suspend (Ubuntu's GUI power menu,
+#     the method used on 002) and to re-run this script after resuming.
+#   - End-of-run message points at scripts/laptop/pull-results.sh instead
+#     of a hand-typed scp.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -728,7 +734,7 @@ case "$STORAGE_TYPE" in
     log "\n-- hdparm -I security state --"
     echo "$FROZEN_CHECK" | tee -a "$OUT" >/dev/null
     if echo "$FROZEN_CHECK" | grep -Eqi "^\s*frozen\b" ; then
-      die "Drive reports security state FROZEN — hdparm secure erase will fail. This is a known BIOS/ATA behavior (BIOS reissues SECURITY FREEZE LOCK on every POST). Confirmed fix (002, 2026-09-28): suspend the machine to RAM (S3) and resume — this forces a SATA link reset without going through BIOS POST, so the freeze-lock command is never reissued. A full power-off/power-on cycle is NOT reliable by itself, since it goes through POST again and typically refreezes the drive. Nothing was erased."
+      die "Drive reports security state FROZEN — hdparm secure erase will fail. This is a known BIOS/ATA behavior (BIOS reissues SECURITY FREEZE LOCK on every POST). Confirmed fix (002, 2026-09-28): suspend the machine to RAM (S3) and resume — this forces a SATA link reset without going through BIOS POST, so the freeze-lock command is never reissued. To do it: top-right system menu > Power > Suspend, wake the machine with the power button, then re-run this script (same directory). A full power-off/power-on cycle is NOT reliable by itself, since it goes through POST again and typically refreezes the drive. Nothing was erased."
     fi
     ERASE_METHOD="hdparm security-erase"
     run_logged "hdparm_set_pass" sudo hdparm --user-master u --security-set-pass p1 "$PRIMARY_DEV"
@@ -989,8 +995,6 @@ echo "Done."
 echo "Full report    : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
 echo "Erase status   : exit=$ERASE_EXIT, verify=$VERIFY_RESULT, partition=$PARTITION_STATUS"
-echo "This live session is not permanent storage — pull these off via SSH once"
-echo "enable-ssh.sh has been run on this machine (see docs/ssh-access.md), e.g."
-echo "from the laptop:"
-echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$OUT ."
-echo "  scp -i ~/.ssh/id_ed25519_refurb <user>@<this-machine-ip>:$SUMMARY_CSV ."
+echo "This live session is not permanent storage — once enable-ssh.sh has been"
+echo "run on this machine, pull these from the laptop (docs/toolkit-reference.md):"
+echo "  scripts/laptop/pull-results.sh <this-machine-ip> <machine-label>"
