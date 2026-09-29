@@ -40,10 +40,14 @@ the exact `wget`/`sha256sum` (Linux) and `Invoke-WebRequest`/`Get-FileHash` (Win
 commands. Diagnostic/erase results and logs leave the machine over SSH instead of a
 physical USB — see `docs/ssh-access.md`.
 
-**Known gap**: `register-update-loop.ps1` (Windows Update automation, below) also needs
-the `PSWindowsUpdate` PowerShell module — many files, not one — sitting next to it on
-the target, and the per-file fetch pattern above doesn't cover that yet. Not yet
-resolved; see "Open items / TODO".
+**Resolved (2026-09-29)**: `register-update-loop.ps1` (Windows Update automation, below)
+used to need the `PSWindowsUpdate` PowerShell module — many files, not one — sitting
+next to it on the target, which the per-file fetch pattern above couldn't cover. Fixed
+by dropping PSWindowsUpdate: `update-loop.ps1` now talks to the Windows Update Agent
+directly via its COM API (`Microsoft.Update.Session` etc.), which ships with Windows —
+nothing extra to deliver. See `update-loop.ps1`'s own header and
+`docs/update-loop-design-and-recovery.md` for the how/why. Not yet run on real hardware
+(same caveat as before this change — see that doc's status line).
 
 ## Per-machine workflow — Windows-only batch (current)
 
@@ -66,10 +70,9 @@ this — it's kept for when that phase resumes.
 5. Boot Windows 11 USB → install to the unallocated space
 6. Set a real password on the local admin account (Rufus's online-account bypass — see
    "Building each Rufus USB" above — leaves it blank)
-7. Fetch register-update-loop.ps1, update-loop.ps1, check-update-status.ps1 (+ the
-   PSWindowsUpdate module — see the delivery gap above), verify checksums, run
-   register-update-loop.ps1 elevated. It registers the Windows Update automation and
-   the machine drives itself from there.
+7. Fetch register-update-loop.ps1, update-loop.ps1, check-update-status.ps1, verify
+   checksums, run register-update-loop.ps1 elevated. It registers the Windows Update
+   automation and the machine drives itself from there.
 8. Periodically run check-update-status.ps1 (elevated) until it verdicts OK
 9. Verify Windows activation manually (Settings → System → Activation) — no script
    checks this yet
@@ -141,8 +144,9 @@ Before a machine leaves for its recipient:
   Dual-boot suitability evaluation was dropped from the script for the current
   Windows-only batch (see diagnostics.sh's own v0.7 changelog) — needs reinstating when
   the dual-boot phase resumes, not re-derived from scratch.
-- `register-update-loop.ps1`'s dependency on the `PSWindowsUpdate` module (many files,
+- ~~`register-update-loop.ps1`'s dependency on the `PSWindowsUpdate` module (many files,
   not one) has no delivery mechanism under the current per-file wget/Invoke-WebRequest
-  model — see "Script delivery (current)" above. Unresolved.
+  model~~ — resolved 2026-09-29 by dropping the module; see "Script delivery (current)"
+  above.
 - Criteria for falling back from Mint Cinnamon to Mint Xfce not yet defined (likely tied to the same hardware triage thresholds as the dual-boot decision — see methodology.md §5). Deferred along with the rest of the dual-boot phase.
 - Confirm whether Rufus's default local account naming behavior needs a standard username set explicitly per install, rather than relying on whatever default it falls back to.

@@ -1,36 +1,56 @@
 # Windows Update stage: design notes and manual recovery
 
 Scripts: `update-loop.ps1`, `register-update-loop.ps1`, `check-update-status.ps1`.
-Status: **built and logic-tested off-Windows only** (parsed with PowerShell 7.4; every exit path exercised against stubbed Windows cmdlets). Not yet run on a Le Relais machine. See "Verify on the next machine" at the bottom.
+Status: **built and logic-tested off-Windows only** (parsed with PowerShell 7.4; every exit path exercised against stubbed Windows cmdlets). Not yet run on a Le Relais machine. See "Verify on the next machine" at the bottom. This now includes the 2026-09-29 PSWindowsUpdate -> COM API rewrite below, which is *additionally* unverified against real hardware in its own right (the WUA COM sequence has been checked against Microsoft's own API docs and community examples, not run end-to-end yet).
 
-## Toolbox USB layout
+## Fetching the scripts
 
-```
-refurb\
-  register-update-loop.ps1
-  update-loop.ps1
-  check-update-status.ps1
-  modules\PSWindowsUpdate\<version>\...     <- copy of the module folder from a machine that has it
-```
-
-Per machine, from an elevated Windows PowerShell:
+No Toolbox USB layout any more (retired — see CLAUDE.md). Fetch each script
+individually per CLAUDE.md's "Delivery to target machines", into the same folder:
 
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File E:\refurb\register-update-loop.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/register-update-loop.ps1 -OutFile register-update-loop.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/update-loop.ps1 -OutFile update-loop.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/windows/check-update-status.ps1 -OutFile check-update-status.ps1
+Get-FileHash *.ps1 -Algorithm SHA256   # compare against the printed card
 ```
 
-This copies the module and the scripts in, locks down `C:\ProgramData\Refurb`, registers the task, prints back what Windows actually stored, and starts pass 0. From there you can walk away.
+No module to fetch alongside them any more (see "PSWindowsUpdate -> COM API" below). Per machine, from an elevated Windows PowerShell in that same folder:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File .\register-update-loop.ps1
+```
+
+This copies the scripts into `C:\ProgramData\Refurb`, locks it down, registers the task, prints back what Windows actually stored, and starts pass 0. From there you can walk away.
 
 ---
 
 ## Design decisions (and where they differ from the brief)
 
-### 1. "Found nothing" vs "check failed" needs two independent signals
-`-ErrorAction Stop` turns PSWindowsUpdate's `Write-Error` into a catchable throw. That covers most failures, but not all of them: some WU problems only show up as *warnings*, and an empty result looks exactly like "up to date". This branch is the dangerous one, because a false "nothing found" disables the task and reports success. So:
-- Warnings are captured (`-WarningVariable`) and logged, never discarded.
-- A **zero result is confirmed** with a direct Windows Update Agent search (`Microsoft.Update.Session` COM API) before the script declares DONE. The API returns an explicit `ResultCode` (2 = succeeded). DONE requires PSWindowsUpdate = 0 **and** WUA ResultCode = 2 **and** WUA count = 0. If the confirmation throws, the result is ERROR (exit 10). If they disagree, the result is ERROR (exit 12). Neither case is DONE.
-- The WUA search uses `BrowseOnly=0` to leave out optional/preview items, so if WUA finds more than PSWindowsUpdate did, that points to a real problem and isn't just noise from optional updates.
-- The confirmation runs once per machine, only on the final pass, so it costs about 10–30 s.
+### 0. PSWindowsUpdate -> COM API (2026-09-29)
+`update-loop.ps1` and `register-update-loop.ps1` no longer use the `PSWindowsUpdate` PowerShell module. `update-loop.ps1` now calls the Windows Update Agent (WUA) directly through its COM API (`Microsoft.Update.Session`, `.ServiceManager`, etc.), which ships as part of Windows.
+
+**Why:** `PSWindowsUpdate` is third-party and normally installs via `Install-Module` from PowerShellGallery.com, which CLAUDE.md already rules out on the Le Relais network. The workaround was to hand-copy the module's files onto each machine — but that assumed Toolbox-USB delivery, which has since been retired in favor of fetching scripts individually via `raw.githubusercontent.com` (see "Fetching the scripts" above). A multi-file module has no path through that one-file-at-a-time model, so `register-update-loop.ps1` could not actually complete on a machine that only received the three `.ps1` files — this was open and unresolved (`toolkit-reference.md`'s "Known gap") until this change. The COM API is part of the OS, so there's nothing left to deliver at all.
+
+**What changed, mechanically:**
+- The Microsoft Update service (drivers, Office, etc. — not just OS updates) is opted into with `Microsoft.Update.ServiceManager.AddService2("7971f918-a847-4430-9279-4a52d1efe18d", 7, "")`, Microsoft's own documented sample for this (`learn.microsoft.com/windows/win32/wua_sdk/opt-in-to-microsoft-update`). This is what `-MicrosoftUpdate` did under the hood. Idempotent: checked against the existing `ServiceManager.Services` list before adding.
+- The searcher is pointed at that service explicitly (`ServerSelection = 3` [`ssOthers`], `ServiceID = <that GUID>`), rather than relying on it becoming the implicit default.
+- Each pending update needs `.AcceptEula()` called once if `.EulaAccepted` is false — `-AcceptAll` doesn't exist outside PSWindowsUpdate, so this is done explicitly, per update, before it's added to the download collection.
+- Download and install are now two explicit COM calls (`Session.CreateUpdateDownloader()` / `.CreateUpdateInstaller()`) instead of one `Get-WindowsUpdate -Install`. Only updates where `.IsDownloaded` came back true after the download step go into the install collection.
+- `Installer.AllowSourcePrompts = $false` is set explicitly — there's no interactive session for WUA to prompt in a SYSTEM scheduled task, so this forecloses it rather than relying on it never coming up.
+- `Installer.RebootRequiredBeforeInstallation` is checked and treated as an error (exit 20) if true, rather than calling `Install()` regardless. This is a new safety check that didn't exist before — the PSWindowsUpdate-based script had no equivalent, and in principle `Test-RebootPending` (checked on the "nothing found" path) should already prevent this scenario from arising, but it's a cheap belt-and-suspenders check on the path that most needs one.
+- `-IgnoreReboot` had no bespoke equivalent to add: `IUpdateInstaller.Install()` never reboots the machine on its own regardless of caller — rebooting was always this script's own job via `Restart-Computer -Force`, so behavior here is unchanged.
+- Per-update result logging now reads WUA's own `OperationResultCode` (`2`=Succeeded, `3`=SucceededWithErrors, `4`=Failed, `5`=Aborted) via `InstallationResult.GetUpdateResult($i)`, and `.KBArticleIDs`/`.Title` off the `IUpdate` object itself, replacing PSWindowsUpdate's `.Result`/`.KB`/`.Title` properties. Same information, different shape.
+- The "confirm zero-result via WUA" double-check (old §1) and its exit code 12 are gone — see the rewritten §1 below for why that's a safe simplification, not a dropped safeguard.
+
+**Verified vs not:** the `AddService2` GUID/flags and the overall session/searcher/downloader/installer object sequence match Microsoft's own WUA SDK documentation and multiple independent community scripts using the identical pattern under a SYSTEM scheduled task (the same execution context this project already uses, and already used for the PSWindowsUpdate version). What's *not* independently verified yet, because nothing in this stage has run on real Le Relais hardware regardless of module choice: the exact property names/behavior on this specific Windows build (26200), and whether `RebootRequiredBeforeInstallation`/`AllowSourcePrompts` behave as documented under this task's specific principal/logon-type combination. Same "verify on the next machine" caveat as the rest of this stage — see that section at the bottom, now updated.
+
+### 1. "Found nothing" vs "check failed"
+The check calls the Windows Update Agent directly (`Microsoft.Update.Session` COM API — see "PSWindowsUpdate -> COM API" below) and requires an explicit `ResultCode` of 2 (succeeded) before trusting the result at all; anything else is treated as a failed check attempt and retried. A zero-length `Updates` collection after a genuinely-succeeded search (`ResultCode = 2`) is what DONE means.
+
+This used to need a second, independent check: when the search went through PSWindowsUpdate (a third-party wrapper), a false "nothing found" from a wrapper bug was a real risk, dangerous because it disables the task and reports success. The fix at the time was a confirmation search directly against the WUA COM API before declaring DONE, with disagreement between the two treated as ERROR (exit 12). Now that the *primary* check already **is** the WUA COM API, that whole failure mode — the wrapper's answer differing from the underlying agent's — can't occur, so the confirmation step and exit 12 were removed rather than kept as redundant belt-and-suspenders. Exit code 12 stays documented as retired (not reassigned) in case an old copy of the script is ever run by mistake.
+
+The search criteria (`IsInstalled=0 and IsHidden=0 and BrowseOnly=0`) is unchanged from what the old confirmation step already used — `BrowseOnly=0` leaves out optional/preview items.
 
 **Check retries.** A failed check is retried inside the same run (waits of 60/120/240 s, about 7 min total). The retries cover the network not being up yet at boot, without the script having to guess at what "network is up" means (Le Relais may use a proxy, etc.). The task trigger also has a 1-minute delay after boot.
 
@@ -65,7 +85,7 @@ To make `LastTaskResult` mean something, the script sets explicit exit codes:
 | `0x0` | DONE |
 | `0xBC2` (3010) | Reboot requested. **If the machine is still up, the reboot didn't happen.** 3010 is Windows' own "success, reboot required" code. |
 | `0xA` (10) | Update check failed after retries |
-| `0xC` (12) | PSWindowsUpdate and the WU API disagree |
+| `0xC` (12) | RETIRED — see "PSWindowsUpdate -> COM API" above |
 | `0x14` (20) | Install threw |
 | `0x1E` (30) | Pass cap reached (ABORTED) |
 | `0x28` (40) | Another instance was already running |
@@ -149,12 +169,13 @@ Restart-Computer
 ## Verify on the next machine (currently unknown or assumed)
 1. `LastTaskResult` after a reboot pass: I expect `0xBC2`. Check it by running `Get-ScheduledTaskInfo RefurbWindowsUpdate` after the stage finishes; the last run should show `0x0`.
 2. `LastTaskResult` after a time-limit kill: I expect `0x41306`, from memory, **unverified**. Optional deliberate test: `register-update-loop.ps1 -TimeLimitHours 0.02` (about 1 min) on a machine that has updates pending.
-3. The install output carries a `Result` property per update. The transcript and log will show `result: Installed KB…` lines if it does. If those lines are missing, per-KB failure counting silently does nothing (the pass cap still applies).
-4. The WUA confirmation search accepts `BrowseOnly=0` on this build (26200). If it doesn't, the final pass shows ERROR "confirmation search failed" rather than a false DONE, so the failure is safe but you'd need to tell me.
-5. The icacls lockdown doesn't break the task (the first pass running at all confirms this).
+3. `AddService2`'s registration of the Microsoft Update service actually broadens the search beyond OS-only updates on this build (26200) — i.e. `-MicrosoftUpdate`'s old effect is genuinely preserved, not just that the call doesn't error. Compare update counts/titles against what Settings > Windows Update shows once, on the first real machine.
+4. `GetUpdateResult($i)` lines up with the `$toReallyInstall` collection built earlier in the same pass by construction (same object, same loop order) — should hold, but confirm the first real log's `result:` lines show sensible titles/KBs, not a mismatch.
+5. `RebootRequiredBeforeInstallation` and `AllowSourcePrompts` behave as documented under this specific task principal (`SYSTEM`, `ServiceAccount` logon, `Highest` run level) — no reason to expect otherwise, but this exact combination hasn't been exercised against the live WUA API before.
+6. The icacls lockdown doesn't break the task (the first pass running at all confirms this).
 
 ## Not built yet
-- **Hand-off cleanup** before a machine leaves: `Unregister-ScheduledTask RefurbWindowsUpdate`, copy the log to the toolbox USB if wanted, remove `C:\ProgramData\Refurb`, decide whether PSWindowsUpdate stays installed.
+- **Hand-off cleanup** before a machine leaves: `Unregister-ScheduledTask RefurbWindowsUpdate`, remove `C:\ProgramData\Refurb`. (No module to decide about any more — nothing was installed.)
 - Chaining the later stages (the hook above).
 
 ## Side notes from the machine-2 log (for when steps 3–4 get scripted)

@@ -5,7 +5,18 @@
   Each run = one "pass": check -> install -> reboot, or check -> DONE.
   All state lives in files under C:\ProgramData\Refurb, so it can also be
   run by hand from an elevated prompt and the task carries on afterwards.
- 
+
+  Talks to the Windows Update Agent directly via its COM API
+  (Microsoft.Update.Session and friends) - no PSWindowsUpdate module.
+  That module has no delivery path under the current per-file
+  raw.githubusercontent.com fetch model (it's many files, not one; see
+  toolkit-reference.md's now-resolved "Known gap"), and the COM API is
+  part of Windows itself, so there's nothing left to deliver. The
+  Microsoft Update service (drivers/Office/etc, not just OS updates -
+  what PSWindowsUpdate's -MicrosoftUpdate switch did) is opted into via
+  Microsoft.Update.ServiceManager.AddService2, Microsoft's own documented
+  method (learn.microsoft.com/windows/win32/wua_sdk/opt-in-to-microsoft-update).
+
   Files:
     update-status.txt      one line, overwritten: STATE | pass | since | detail
     update-log.txt         append-only history
@@ -17,7 +28,10 @@
     3010  reboot requested (if you ever SEE this with the machine still up,
           the reboot didn't happen)
       10  update check failed after all retries (task left enabled)
-      12  PSWindowsUpdate said "nothing" but direct WU API disagreed
+      12  RETIRED - was "PSWindowsUpdate said nothing but direct WU API
+          disagreed"; the check IS the WU API now, so the two can't disagree.
+          Kept out of use rather than reassigned, in case an old disk copy
+          of this script is ever run by mistake.
       20  install call threw (task left enabled)
       30  pass cap exceeded - ABORTED, task disabled, needs a human
       40  another instance already running
@@ -62,7 +76,32 @@ function Set-Status([string]$state, [string]$detail) {
 function Format-Err($e) {
     return ('{0} [HRESULT 0x{1:X8}]' -f $e.Exception.Message, $e.Exception.HResult)
 }
- 
+
+# The well-known Microsoft Update service ID, straight from Microsoft's own
+# opt-in sample (learn.microsoft.com/windows/win32/wua_sdk/opt-in-to-microsoft-update).
+# Registering it is what -MicrosoftUpdate used to do: without it, the searcher
+# below only sees OS updates, not drivers/Office/etc.
+$script:MuServiceId = '7971f918-a847-4430-9279-4a52d1efe18d'
+
+function Register-MicrosoftUpdateService {
+    $sm = New-Object -ComObject Microsoft.Update.ServiceManager
+    foreach ($svc in $sm.Services) {
+        if ($svc.ServiceID -eq $script:MuServiceId) { return }   # already opted in
+    }
+    $sm.ClientApplicationID = 'Le Relais Refurb'
+    $sm.AddService2($script:MuServiceId, 7, '') | Out-Null
+}
+
+# One searcher per check attempt (cheap; avoids reusing a COM object across
+# a retry that may have failed partway through).
+function New-UpdateSearcher {
+    Register-MicrosoftUpdateService
+    $searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
+    $searcher.ServerSelection = 3        # ssOthers: search the service named below,
+    $searcher.ServiceID = $script:MuServiceId   # not just plain Windows Update
+    return $searcher
+}
+
 function Get-PreviousState {
     if (Test-Path $StatusFile) {
         $raw = (Get-Content $StatusFile -TotalCount 1)
@@ -86,15 +125,6 @@ function Test-RebootPending {
         if (Test-Path $k) { return $true }
     }
     return $false
-}
- 
-# Direct Windows Update Agent search, used only to confirm a "nothing found"
-# result before we declare DONE. ResultCode 2 = orcSucceeded; anything else,
-# or a thrown COMException, means the search did not genuinely succeed.
-function Confirm-NoUpdatesViaWUA {
-    $searcher = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher()
-    $r = $searcher.Search("IsInstalled=0 and IsHidden=0 and BrowseOnly=0")
-    return [pscustomobject]@{ ResultCode = [int]$r.ResultCode; Count = [int]$r.Updates.Count }
 }
  
 # Hook for later stages (disk/activation/driver checks, app installs).
@@ -152,8 +182,6 @@ try {
     Write-Log "pass $($script:Pass) starting (run as $([Environment]::UserName))"
  
     # ------------------------------------------------------------- check
-    Import-Module PSWindowsUpdate -ErrorAction Stop
- 
     $pending = $null
     $checkOk = $false
     $attempt = 0
@@ -163,12 +191,15 @@ try {
         Set-Status 'CHECKING' "attempt $attempt"
         Write-Log "pass $($script:Pass) check attempt $attempt START"
         try {
-            # -ErrorAction Stop turns Write-Error into a throw; warnings are
-            # captured separately and logged, since some WU failures surface
-            # only as warnings.
-            $pending = @(Get-WindowsUpdate -MicrosoftUpdate -ErrorAction Stop `
-                          -WarningVariable wuWarn -WarningAction SilentlyContinue)
-            foreach ($w in $wuWarn) { Write-Log "pass $($script:Pass) check WARNING: $w" }
+            $searcher = New-UpdateSearcher
+            $search = $searcher.Search('IsInstalled=0 and IsHidden=0 and BrowseOnly=0')
+            if ([int]$search.ResultCode -ne 2) {
+                # 2 = orcSucceeded. Anything else means the search itself did
+                # not genuinely complete, even though it didn't throw.
+                throw "search returned ResultCode=$([int]$search.ResultCode) (2=succeeded expected)"
+            }
+            $pending = @()
+            foreach ($u in $search.Updates) { $pending += $u }
             $checkOk = $true
         } catch {
             $lastErr = (Format-Err $_)
@@ -198,21 +229,11 @@ try {
             Restart-Computer -Force
             exit 3010
         }
- 
-        try { $wua = Confirm-NoUpdatesViaWUA }
-        catch {
-            $msg = (Format-Err $_)
-            Write-Log "pass $($script:Pass) confirmation search via WU API threw: $msg"
-            Set-Status 'ERROR' "confirmation search failed: $msg"
-            exit 10
-        }
-        if ($wua.ResultCode -ne 2 -or $wua.Count -gt 0) {
-            Write-Log "pass $($script:Pass) MISMATCH - PSWindowsUpdate found 0, WU API ResultCode=$($wua.ResultCode) Count=$($wua.Count)"
-            Set-Status 'ERROR' "check results disagree (WUA ResultCode=$($wua.ResultCode), Count=$($wua.Count))"
-            exit 12
-        }
- 
-        Write-Log "pass $($script:Pass) no updates found (confirmed by WU API) - stage complete"
+
+        # No separate confirmation search needed: the check above already
+        # IS the Windows Update Agent (ResultCode 2 = genuinely succeeded),
+        # not a third-party wrapper that might disagree with it.
+        Write-Log "pass $($script:Pass) no updates found - stage complete"
         Set-Status 'DONE' 'no updates remaining'
         Disable-RefurbTask
         Invoke-NextStage
@@ -220,13 +241,38 @@ try {
     }
  
     # ----------------------------------------------------------- install
-    foreach ($u in $pending) { Write-Log "pass $($script:Pass)   pending: $($u.KB) $($u.Title)" }
+    foreach ($u in $pending) { Write-Log "pass $($script:Pass)   pending: $($u.KBArticleIDs -join ',') $($u.Title)" }
     Set-Status 'INSTALLING' "$($pending.Count) update(s)"
     Write-Log "pass $($script:Pass) install START ($($pending.Count) update(s))"
     try {
-        $results = @(Get-WindowsUpdate -MicrosoftUpdate -AcceptAll -Install -IgnoreReboot `
-                      -ErrorAction Stop -WarningVariable instWarn -WarningAction SilentlyContinue)
-        foreach ($w in $instWarn) { Write-Log "pass $($script:Pass) install WARNING: $w" }
+        $toInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+        foreach ($u in $pending) {
+            if (-not $u.EulaAccepted) { $u.AcceptEula() | Out-Null }
+            [void]$toInstall.Add($u)
+        }
+
+        $session = New-Object -ComObject Microsoft.Update.Session
+        $downloader = $session.CreateUpdateDownloader()
+        $downloader.Updates = $toInstall
+        $downloadResult = $downloader.Download()
+        if ([int]$downloadResult.ResultCode -notin 2, 3) {   # 2=succeeded, 3=succeeded with errors
+            throw "download returned ResultCode=$([int]$downloadResult.ResultCode)"
+        }
+
+        $toReallyInstall = New-Object -ComObject Microsoft.Update.UpdateColl
+        foreach ($u in $toInstall) { if ($u.IsDownloaded) { [void]$toReallyInstall.Add($u) } }
+        if ($toReallyInstall.Count -eq 0) {
+            throw "none of $($toInstall.Count) update(s) downloaded successfully"
+        }
+
+        $installer = $session.CreateUpdateInstaller()
+        $installer.ClientApplicationID = 'Le Relais Refurb'
+        $installer.AllowSourcePrompts = $false   # no interactive session to prompt
+        if ($installer.RebootRequiredBeforeInstallation) {
+            throw 'a reboot is required before install can proceed (unexpected here - Test-RebootPending should have caught this on a prior pass)'
+        }
+        $installer.Updates = $toReallyInstall
+        $installResult = $installer.Install()
     } catch {
         $msg = (Format-Err $_)
         Write-Log "pass $($script:Pass) install THREW: $msg"
@@ -235,16 +281,21 @@ try {
         Set-Status 'ERROR' "install failed: $msg"
         exit 20
     }
- 
+
     # Per-update results. A few individual failures are normal WU churn and
     # a reboot is the standard remedy, so we log them and keep looping; the
     # pass cap is what stops an update that fails forever.
+    # OperationResultCode: 2=Succeeded, 3=SucceededWithErrors, 4=Failed, 5=Aborted.
     $failed = 0
-    foreach ($r in $results) {
-        if ($r.PSObject.Properties['Result']) {
-            Write-Log "pass $($script:Pass)   result: $($r.Result) $($r.KB) $($r.Title)"
-            if ("$($r.Result)" -match 'Fail') { $failed++ }
+    for ($i = 0; $i -lt $toReallyInstall.Count; $i++) {
+        $u = $toReallyInstall.Item($i)
+        $rc = [int]($installResult.GetUpdateResult($i).ResultCode)
+        $verdict = switch ($rc) {
+            2 { 'Succeeded' }; 3 { 'SucceededWithErrors' }; 4 { 'Failed' }; 5 { 'Aborted' }
+            default { "Unknown($rc)" }
         }
+        Write-Log "pass $($script:Pass)   result: $verdict $($u.KBArticleIDs -join ',') $($u.Title)"
+        if ($rc -in 4, 5) { $failed++ }
     }
     Write-Log "pass $($script:Pass) install END - $failed failed"
  

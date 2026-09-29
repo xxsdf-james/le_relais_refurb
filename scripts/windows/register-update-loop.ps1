@@ -1,14 +1,17 @@
 <#
-  register-update-loop.ps1 - run ONCE per machine from the Toolbox USB, in an
-  elevated Windows PowerShell:
- 
-    powershell -NoProfile -ExecutionPolicy Bypass -File E:\refurb\register-update-loop.ps1
- 
-  Expected layout next to this script on the USB:
-    update-loop.ps1
-    check-update-status.ps1
-    modules\PSWindowsUpdate\<version>\...   (copied from a machine with internet)
- 
+  register-update-loop.ps1 - run ONCE per machine, in an elevated Windows
+  PowerShell, after fetching it plus update-loop.ps1 and
+  check-update-status.ps1 individually via Invoke-WebRequest (see CLAUDE.md,
+  "Delivery to target machines"):
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\register-update-loop.ps1
+
+  Expects update-loop.ps1 and check-update-status.ps1 sitting next to it
+  (wherever they were fetched to). No PSWindowsUpdate module to deliver
+  alongside it any more: update-loop.ps1 talks to the Windows Update Agent
+  directly via its COM API, which ships with Windows - see update-loop.ps1's
+  own header for why.
+
   Switches:
     -MaxPasses N        pass cap passed to update-loop.ps1 (default 10)
     -TimeLimitHours N   ExecutionTimeLimit for a single run (default 4)
@@ -28,7 +31,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $TaskName  = 'RefurbWindowsUpdate'
 $Dir       = 'C:\ProgramData\Refurb'
-$ModDest   = 'C:\Program Files\WindowsPowerShell\Modules\PSWindowsUpdate'
 $Src       = $PSScriptRoot
  
 function Fail([string]$m) { Write-Host "FAILED: $m" -ForegroundColor Red; exit 1 }
@@ -40,7 +42,7 @@ if (-not (New-Object Security.Principal.WindowsPrincipal $id).IsInRole(
     Fail 'not elevated - reopen PowerShell as Administrator'
 }
  
-# 2. Source files present on the USB?
+# 2. Source files present next to this script?
 foreach ($f in 'update-loop.ps1', 'check-update-status.ps1') {
     if (-not (Test-Path (Join-Path $Src $f))) { Fail "missing $f next to this script ($Src)" }
 }
@@ -51,21 +53,7 @@ if ($existing -and $existing.State -eq 'Running') {
     Fail "task $TaskName is running right now - wait for it, or Stop-ScheduledTask first"
 }
  
-# 4. PSWindowsUpdate into the AllUsers module path (no Install-Module: the
-#    Le Relais network blocks powershellgallery.com).
-if (-not (Test-Path $ModDest)) {
-    $modSrc = Join-Path $Src 'modules\PSWindowsUpdate'
-    if (-not (Test-Path $modSrc)) { Fail "PSWindowsUpdate not installed and not found at $modSrc" }
-    Copy-Item -Path $modSrc -Destination $ModDest -Recurse -Force
-    Write-Host "copied PSWindowsUpdate to $ModDest"
-}
-# Prove it imports in a clean process - the same way the task will load it.
-$modVer = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command `
-    "Import-Module PSWindowsUpdate -ErrorAction Stop; (Get-Module PSWindowsUpdate).Version.ToString()" 2>&1
-if ($LASTEXITCODE -ne 0) { Fail "PSWindowsUpdate does not import: $modVer" }
-Write-Host "PSWindowsUpdate $modVer imports OK"
- 
-# 5. Working folder, locked down. SYSTEM runs whatever is in update-loop.ps1,
+# 4. Working folder, locked down. SYSTEM runs whatever is in update-loop.ps1,
 #    so only SYSTEM and Administrators may write here.
 New-Item -ItemType Directory -Path $Dir -Force | Out-Null
 & icacls.exe $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /Q | Out-Null
@@ -81,7 +69,7 @@ if (-not $KeepState) {
     Add-Content (Join-Path $Dir 'update-log.txt') "$(Get-Date -Format o)  registered (MaxPasses=$MaxPasses, TimeLimit=${TimeLimitHours}h)" -Encoding UTF8
 }
  
-# 6. The task.
+# 5. The task.
 $scriptPath = Join-Path $Dir 'update-loop.ps1'
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
     "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`" -MaxPasses $MaxPasses")
@@ -100,7 +88,7 @@ if ($existing) { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false }
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Principal $principal -Settings $settings | Out-Null
  
-# 7. Read back what Windows actually stored, rather than trusting our inputs.
+# 6. Read back what Windows actually stored, rather than trusting our inputs.
 $t = Get-ScheduledTask -TaskName $TaskName
 Write-Host ''
 Write-Host "Task        : $($t.TaskName)  [$($t.State)]"
