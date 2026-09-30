@@ -128,7 +128,7 @@ Your observed install took about 6 min. A cumulative update on an old HDD machin
 Always start with an **elevated** PowerShell. First re-apply the folder ACL — until the scripts fix it themselves, files in `C:\ProgramData\Refurb` can come back Access Denied even when elevated, which makes `check-update-status.ps1` misreport `NO STATUS FILE` and blocks the log reads below (`known-issues.md`, "Windows Update stage"):
 
 ```
-takeown /F C:\ProgramData\Refurb /R /D Y
+takeown /F C:\ProgramData\Refurb /R /D O
 icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
 powershell -ExecutionPolicy Bypass -File C:\ProgramData\Refurb\check-update-status.ps1
 ```

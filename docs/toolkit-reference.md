@@ -273,9 +273,13 @@ elevated Administrator session) fails with Access Denied — this includes
 `check-update-status.ps1` itself. See `known-issues.md`, "Windows Update stage" for the
 full diagnosis. One recursive sweep fixes the whole folder at once:
 ```
-takeown /F C:\ProgramData\Refurb /R /D Y
+takeown /F C:\ProgramData\Refurb /R /D O
 icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
 ```
+`/D O`, not `/D Y`: the answer letter for `takeown /D` is localized, and on French
+Windows it is `O` (*Oui*). `Y` fails with an invalid-option error. `takeown /?` on
+the machine lists the accepted letters.
+
 Why every time, not once: the update loop keeps creating new files after the sweep —
 `update-status.txt` is replaced with a fresh file on every state change, plus a new
 transcript each pass — and nothing yet confirms those inherit correctly. If they

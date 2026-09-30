@@ -91,7 +91,7 @@ Each entry: **Symptom → Cause → Fix**, plus how broadly it's expected to app
 - **What still worked despite this**: the `RefurbWindowsUpdate` scheduled task itself, running as SYSTEM, wrote correct state throughout (real driver/update results ended up in `update-log.txt`) — SYSTEM's own access to files it creates isn't gated the same way. The bug only blocks a *human* reading that state back afterward, which is exactly the "Windows Update stage — full walkthrough" step 3–4 verification in `toolkit-reference.md`.
 - **Fix (workaround, confirmed working once)**: one recursive sweep of the whole folder, run right after `register-update-loop.ps1` and again **before every** `check-update-status.ps1` call (itself one of the broken files) or manual read. Why repeat it: the loop keeps creating new files after the first sweep (`update-status.txt` is replaced via write-to-`.tmp` + `Move-Item` on every state change; a new transcript per pass), and it isn't confirmed that those inherit correctly afterward. If they don't, `check-update-status.ps1` misreports `NO STATUS FILE`. The sweep is idempotent, so repeating it is the cheap safe default until the script fix below lands:
   ```
-  takeown /F C:\ProgramData\Refurb /R /D Y
+  takeown /F C:\ProgramData\Refurb /R /D O
   icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
   ```
   `toolkit-reference.md`'s walkthrough now includes this step. A real fix belongs in `register-update-loop.ps1`/`update-loop.ps1` — explicitly re-applying ACLs to each file after creating it, rather than relying on inheritance that's demonstrably not propagating here — but that means cutting a new tag and re-verifying checksums batch-wide, so it hasn't been done yet.
