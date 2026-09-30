@@ -6,6 +6,18 @@ Each entry: **Symptom → Cause → Fix**, plus how broadly it's expected to app
 
 ---
 
+## Booting from USB
+
+### ThinkCentre M900z doesn't list most USB sticks as boot devices — fixed by enabling USB Enumeration Delay
+- **Symptom**: on 003 (ThinkCentre M900z), the BIOS didn't offer most USB sticks as boot devices. Four different sticks were tried in every USB port, with both Ubuntu and Windows 11 media, and only one stick was ever recognized. Every stick that failed on 003 had been tested as working in another machine.
+- **Cause**: the BIOS checks the USB ports during startup before some sticks are ready to answer, so those sticks never appear in the boot list. That explains why it varied from stick to stick. The BIOS setting **USB Enumeration Delay** (Devices → USB Setup, off by default) gives USB devices extra time to be detected at startup. According to Lenovo's ThinkCentre BIOS reference, it "provides extra delay to USB enumeration to improve compatibility" and may increase POST time (<https://docs.lenovocdrt.com/ref/bios/settings/thinkcentre/usb_setup/>).
+- **Fix**: enable USB Enumeration Delay in the BIOS (F1 at the Lenovo logo), save with F10, then boot the stick from the F12 menu. After this change 003 recognized more sticks and booted Ubuntu Live 26.04 (2026-09-30). The only cost is a slightly longer startup screen.
+- **Not explained by this fix — watch for it**: before the setting was changed, the one recognized stick (freshly rewritten with Ubuntu) got as far as Ubuntu's boot menu and kernel. Ubuntu then stopped with "unable to find a medium containing a live file system". The machine then wouldn't power off and showed a kernel panic, and afterwards the BIOS stopped recognizing that stick too. This happened after Linux had taken over the USB ports, and the enumeration delay only affects the BIOS, so the setting doesn't account for it. Nothing has confirmed whether it was a temporary bad USB state on that machine or a flaky USB connection. If a live session on an M900z shows the stick dropping out, check with `sudo dmesg | grep -iE 'usb.*(reset|disconnect|error)'` before running diagnostics or a wipe. Repeated resets or disconnects on the stick mean it isn't safe to go on.
+- **Boot mode on the same machine**: 003's BIOS allowed both boot modes, with the legacy (non-UEFI) entries first in the boot order, and Secure Boot was off (opening diagnostics, 2026-09-30). The opening diagnostics still booted via UEFI. A legacy Windows install would leave no Windows Boot Manager UEFI entry, so closing diagnostics could never mark the machine GREEN, and Secure Boot would stay off. Before installing Windows, set **CSM** to Disabled, **Boot Mode** to UEFI Only and **Secure Boot** to Enabled. Menu names haven't been checked on the M900z. Don't use F9 (load defaults) after enabling USB Enumeration Delay: it turns the delay back off.
+- **Applies to**: confirmed on 003 only. If other M900z units are in the batch, enable the setting before their first boot attempt. It's harmless and fixed this machine, but nobody has checked whether every M900z needs it. 001 and 002 booted USB without it.
+
+---
+
 ## Diagnostics / erase workflow
 
 ### erase-partition.sh's pre-sanitize cross-check compared a drive serial against a machine serial — always a coincidental match at best
