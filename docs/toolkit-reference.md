@@ -266,12 +266,14 @@ This copies the three scripts into `C:\ProgramData\Refurb`, registers the
 `RefurbWindowsUpdate` scheduled task, and starts pass 0. The machine drives itself from
 here, rebooting automatically between passes as needed — you can walk away.
 
-**Known bug — run this fix before EVERY check in step 3 (and before reading any file
-in `C:\ProgramData\Refurb` by hand)**: files created under `C:\ProgramData\Refurb`
-don't inherit the folder's ACL, so reading any of them back (even from a fully
-elevated Administrator session) fails with Access Denied — this includes
-`check-update-status.ps1` itself. See `known-issues.md`, "Windows Update stage" for the
-full diagnosis. One recursive sweep fixes the whole folder at once:
+**Known bug — run this fix only if a check in step 3 (or reading a file in
+`C:\ProgramData\Refurb` by hand) fails with Access Denied (`L'accès … est refusé`) or
+reports `NO STATUS FILE`**: on one machine, files created under `C:\ProgramData\Refurb`
+didn't inherit the folder's ACL, so reading any of them back (even from a fully
+elevated Administrator session) failed — including `check-update-status.ps1` itself.
+It did not happen on 003 (M900z) with the same scripts, so don't run the fix by
+default. See `known-issues.md`, "Windows Update stage" for the full diagnosis. One
+recursive sweep fixes the whole folder at once, then re-run the check:
 ```
 takeown /F C:\ProgramData\Refurb /R /D O
 icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" /T /Q
@@ -280,11 +282,10 @@ icacls C:\ProgramData\Refurb /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(
 Windows it is `O` (*Oui*). `Y` fails with an invalid-option error. `takeown /?` on
 the machine lists the accepted letters.
 
-Why every time, not once: the update loop keeps creating new files after the sweep —
-`update-status.txt` is replaced with a fresh file on every state change, plus a new
-transcript each pass — and nothing yet confirms those inherit correctly. If they
-don't, `check-update-status.ps1` can't read the status file and misreports `NO STATUS
-FILE`. The sweep is harmless to repeat.
+On a machine that needs it, expect to need it again at later checks: the update loop
+keeps creating new files after the sweep (`update-status.txt` is replaced with a
+fresh file on every state change, plus a new transcript each pass), and nothing
+confirms those inherit correctly. The sweep is harmless to repeat.
 
 **3. Check progress periodically, until VERDICT reads `OK - updates complete`:**
 

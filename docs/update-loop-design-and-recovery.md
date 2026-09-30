@@ -125,7 +125,7 @@ Your observed install took about 6 min. A cumulative update on an old HDD machin
 
 ## Manual recovery procedure
 
-Always start with an **elevated** PowerShell. First re-apply the folder ACL — until the scripts fix it themselves, files in `C:\ProgramData\Refurb` can come back Access Denied even when elevated, which makes `check-update-status.ps1` misreport `NO STATUS FILE` and blocks the log reads below (`known-issues.md`, "Windows Update stage"):
+Always start with an **elevated** PowerShell and run `check-update-status.ps1`. If it, or any log read below, fails with Access Denied or reports `NO STATUS FILE`, re-apply the folder ACL and try again. On one machine, files in `C:\ProgramData\Refurb` came back Access Denied even when elevated; 003 didn't show this with the same scripts (`known-issues.md`, "Windows Update stage"):
 
 ```
 takeown /F C:\ProgramData\Refurb /R /D O
