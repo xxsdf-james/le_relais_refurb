@@ -61,6 +61,23 @@ Each entry: **Symptom → Cause → Fix**, plus how broadly it's expected to app
 
 ---
 
+## Windows install
+
+### Windows Setup fails late in "Installing Windows" with a popup giving no detail — damaged `install.wim` on the USB stick
+- **Symptom**: on 003/CIAD7415 (2026-09-30), Windows Setup failed twice, late in the file-copy stage. The second time it was at 78%, after the percentage had stalled for several minutes. The popup gave no error code and no detail. Setup had already partitioned the disk: the next attempt found a 200 MB System, a 16 MB MSR and a 238.3 GB partition where the erase had left only unallocated space. The second attempt was on a different USB port. At the failure, the stick was still listed in `diskpart` → `list disk`, and the target SSD's SMART data was clean (opening diagnostics).
+- **Misleading log lines**: the last lines of `setuperr.log` were repeated `HWReqChk` errors ("failed to get / failed to retrieve settings"), from Setup's Windows 11 hardware-requirements checker failing to load its settings. They weren't the cause here: the damaged stick was.
+- **Cause**: `sources\install.wim` on the stick didn't match the ISO's copy (SHA-256 mismatch, confirmed afterwards on the Rufus laptop). A failure at about the same percentage on both attempts fits a damaged file: Setup reaches the same damaged part of the image at the same point every time. It's unconfirmed how the file got damaged. A plausible cause is that the Rufus laptop kept going to sleep on its own while plugged in, which can interrupt the stick mid-write.
+- **Fix**: rewrote the ISO to a different stick, confirmed the stick's `install.wim` matched the ISO's, and confirmed the ISO itself by downloading it twice and comparing hashes. The install then completed. `scripts/windows/verify-usb.ps1` now does the stick-vs-ISO check, and `toolkit-reference.md` ("Building each Rufus USB") runs it after every write, with sleep disabled on the Rufus laptop first.
+- **Confound**: the attempt that worked also had the network cable unplugged. The old stick's hash mismatch makes the stick the cause. Installing offline stays in the walkthrough as a cheap precaution, not a proven fix.
+- **Reading the logs at the failure popup (for next time)**: leave the popup open and press Shift+F10.
+  - Check the stick is still connected with `diskpart`, then `list disk`.
+  - Find the log with `dir X:\setuperr.log /s /b`, and again with `C:` in place of `X:`. `where` doesn't exist in Setup's environment.
+  - Open it with `notepad <path>`, then Ctrl+End. `setupact.log` in the same folder has more detail.
+  - The command window uses the keyboard layout picked on Setup's first screen. `wpeutil SetKeyboardLayout` reported success but didn't change the layout in the open window. So pick Français (Suisse) on the first screen.
+- **Applies to**: any machine. This is a problem with the stick, not the machine. Treat every Windows stick written before `verify-usb.ps1` existed as unverified until it's been checked.
+
+---
+
 ## Windows Update stage
 
 ### Files created under `C:\ProgramData\Refurb` don't inherit the folder's ACL — Access Denied reading them back, even from a fully elevated Administrator session
