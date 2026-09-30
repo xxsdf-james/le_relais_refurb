@@ -36,7 +36,7 @@ The **Toolbox USB is retired** (CLAUDE.md, "Out of scope / superseded") — scri
 ## ISO sources
 
 - **Ubuntu Desktop**: `ubuntu.com/download/desktop` — direct download, current LTS. Verify with `sha256sum` against the SHA256SUMS file linked on the same page before use.
-- **Windows 11**: `microsoft.com/software-download/windows11` — official page only, multi-edition ISO, French language selected. No official checksum provided by Microsoft; sourcing from this exact URL is the safeguard.
+- **Windows 11**: `microsoft.com/software-download/windows11` — official page only, multi-edition ISO, French language selected. Guides say the page has a "Verify your download" link near the 64-bit Download button, listing SHA-256 hashes, but it wasn't found when looked for (2026-09-30), so don't count on it. Instead, **download the ISO twice and compare the hashes**: `Get-FileHash <first>.iso, <second>.iso -Algorithm SHA256`. Two downloads that match can't both be corrupted the same way. Both must be the same release (same file name, fetched on the same day), because Microsoft refreshes the ISOs and a newer copy has a different hash. Third-party hash lists aren't official: a match with one is good, but a mismatch proves nothing, because the list may be for a different refresh.
 - **Linux Mint**: 22.3 Cinnamon (primary edition), with a fallback to the Xfce edition for machines where Cinnamon isn't suitable — fallback criteria not yet defined.
 
 ## Script delivery (current)
