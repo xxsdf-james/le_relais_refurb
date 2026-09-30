@@ -16,14 +16,22 @@ The **Toolbox USB is retired** (CLAUDE.md, "Out of scope / superseded") — scri
 
 ## Building each Rufus USB
 
-1. Download the correct ISO (see below for sources).
-2. Open Rufus, select the target USB, select the ISO.
-3. Partition scheme: **GPT**, target: **UEFI (non-CSM)**.
-4. For the Windows 11 USB specifically: use Rufus's extended Windows 11 install options to bypass the online-Microsoft-account requirement — this leaves the local admin account with a blank password, which Le Relais IT has confirmed is intended for this batch (see the pre-handoff checklist below).
-5. Rufus's "UEFI:NTFS" / media-validation option is **deliberately left off**. Integrity is instead checked periodically by hashing a key file on each USB and re-verifying every 15-20 installs:
-   - Windows: `certutil -hashfile E:\sources\install.wim SHA256`
-   - Mint: `certutil -hashfile E:\casper\filesystem.squashfs SHA256`
-   Record the known-good hash the first time, then re-run periodically and compare — a mismatch means re-create the USB from scratch rather than trying to repair it.
+1. Stop the Rufus laptop from sleeping while plugged in, before writing anything. It was going to sleep on its own mid-write, which is a plausible cause of the damaged stick in `known-issues.md` ("Windows install"). Go to Settings → System → Power & battery → Screen, sleep & hibernate timeouts, and set "When plugged in, put my device to sleep after" to **Never**. Or run `powercfg /change standby-timeout-ac 0` and `powercfg /change hibernate-timeout-ac 0`. Keep the lid open while Rufus runs. If the setting is locked or keeps reverting, it's an IT policy: ask IT rather than working around it.
+2. Download the correct ISO and verify it (see "ISO sources" below).
+3. Open Rufus, select the target USB, select the ISO. For a stick that hasn't been used before, consider Rufus's "Check device for bad blocks" option (under advanced options). It erases and tests the whole stick first, which is slow.
+4. Partition scheme: **GPT**, target: **UEFI (non-CSM)**.
+5. For the Windows 11 USB specifically: use Rufus's extended Windows 11 install options to bypass the online-Microsoft-account requirement — this leaves the local admin account with a blank password, which Le Relais IT has confirmed is intended for this batch (see the pre-handoff checklist below).
+6. File system and UEFI:NTFS: nothing to choose. Rufus writes the Windows stick as NTFS, because `install.wim` is over 4 GB, too big for FAT32. It then adds a small UEFI:NTFS boot partition by itself, which shows up as a second volume on the stick. Rufus's optional media-validation feature is **deliberately left off**. The stick is checked with the hash step below instead.
+7. **Windows stick: verify it after every write, before using it.** Run `scripts/windows/verify-usb.ps1` on the Rufus laptop. Fetch it and check its SHA-256 the same way as the target-machine scripts (CLAUDE.md, "Delivery to target machines"), then run it from an **elevated** PowerShell:
+   ```
+   powershell -ExecutionPolicy Bypass -File .\verify-usb.ps1 -IsoPath "C:\path\to\Win11_French_x64.iso" -UsbDrive E
+   ```
+   It compares `sources\install.wim` on the stick with the ISO's copy.
+   - **MATCH (exit 0):** record the `install.wim` hash in the Obsidian note as this stick's known-good value.
+   - **MISMATCH (exit 1):** don't install from the stick. Re-create it, preferably on a different stick, and verify again.
+
+   The script also prints the ISO file's own hash, for the ISO check in "ISO sources". Re-run it every 15-20 installs to catch a stick going bad, and treat any mismatch the same way.
+8. Mint stick (deferred phase): there's no script yet. Record `certutil -hashfile E:\casper\filesystem.squashfs SHA256` the first time and re-check it every 15-20 installs. A mismatch means re-create the USB from scratch rather than trying to repair it.
 
 ## ISO sources
 
@@ -73,7 +81,13 @@ this — it's kept for when that phase resumes.
    summary.csv) from the laptop with `scripts/laptop/pull-results.sh` — the Windows
    install in step 5 wipes this session, and this summary.csv row is the one closing
    diagnostics builds on in step 11. Exact commands: walkthrough below.
-5. Boot Windows 11 USB → install to the unallocated space
+5. Boot Windows 11 USB → install to the unallocated space. Checklist:
+   - Only use a stick that `verify-usb.ps1` has passed ("Building each Rufus USB", step 7).
+   - Boot the stick's **UEFI** entry in the F12 menu.
+   - On Setup's first screen, pick **Français (Suisse)** for the keyboard. Setup's Shift+F10 command window uses that layout too.
+   - Leave the network cable **unplugged** until the Windows desktop. This is a precaution, not a proven fix (`known-issues.md`, "Windows install"). Plug it in for step 7.
+   - If Setup shows partitions from an earlier failed attempt, delete all of them on the internal disk and install to the single unallocated space.
+   - If Setup fails, leave the error popup open and read the logs first (`known-issues.md`, "Windows install").
 6. ~~Set a real password on the local admin account~~ — **not applicable**: Le Relais IT
    confirmed (2026-09-29) the blank-password local admin account from Rufus's
    online-account bypass is left as-is for this batch. See the pre-handoff checklist.
