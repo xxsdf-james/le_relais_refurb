@@ -88,6 +88,7 @@ this — it's kept for when that phase resumes.
    - Leave the network cable **unplugged** until the Windows desktop. This is a precaution, not a proven fix (`known-issues.md`, "Windows install"). Plug it in for step 7.
    - If Setup shows partitions from an earlier failed attempt, delete all of them on the internal disk and install to the single unallocated space.
    - If Setup fails, leave the error popup open and read the logs first (`known-issues.md`, "Windows install").
+   - Wi-Fi test (~30 s), at the desktop, before plugging the cable in. Skip it if the diag log shows no wireless card (`grep -i wireless` on the `lshw` output). Open the taskbar network icon, then the arrow next to Wi-Fi. **Pass:** several networks with decent bars, similar to a known-good machine in the same spot. **Fail:** no Wi-Fi option (driver not loaded), or only one or two weak networks (antenna cables likely loose). Seeing the list proves the card, driver, radio and antennas, so don't connect: that would leave a saved Wi-Fi profile on the machine. Don't use `netsh wlan show networks` either. Since 24H2 it needs Location services turned on, which would then have to be switched off before handoff. Note pass/fail per machine for the future Wi-Fi column in the summary.
 6. ~~Set a real password on the local admin account~~ — **not applicable**: Le Relais IT
    confirmed (2026-09-29) the blank-password local admin account from Rufus's
    online-account bypass is left as-is for this batch. See the pre-handoff checklist.
