@@ -8,6 +8,11 @@
 # Refuses to write the output if any machine file has the wrong header or
 # not exactly one row, or if the same machine_serial appears in more than
 # one folder (e.g. the same machine pulled under two different labels).
+#
+# Appends one column the per-machine files don't have: wifi_card (yes / no /
+# unknown), read from the lspci and lshw output in that folder's diag_*.txt
+# logs. It's only in the combined file, so the per-machine schema shared with
+# diagnostics.sh and erase-partition.sh is unchanged.
 
 set -euo pipefail
 
@@ -35,13 +40,40 @@ OUTPUT="${1:-$LOCAL_BASE/summary-combined.csv}"
 # Keep in sync with EXPECTED_HEADER in diagnostics.sh and erase-partition.sh.
 EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date,windows_verified"
 
+# Combined file only — not part of the per-machine schema above.
+COMBINED_HEADER="$EXPECTED_HEADER,wifi_card"
+
+# yes:     lspci lists a "Network controller" (the PCI class Wi-Fi cards use;
+#          wired cards are "Ethernet controller"), or lshw lists a network-class
+#          device described as wireless (also catches USB Wi-Fi adapters).
+#          Bluetooth is lshw class "communication", so it doesn't count.
+# no:      the logs list wired network hardware but nothing wireless, so the
+#          scan ran and found no card.
+# unknown: no diag log, or no network hardware listed at all (e.g. lspci/lshw
+#          missing because the live session couldn't install them). Never
+#          reported as "no", since nothing was actually checked.
+# A card disabled in the BIOS doesn't show up in lspci/lshw and reads as "no".
+wifi_card() {
+  local dir="$1" logs
+  logs=("$dir"/diag_*.txt)
+  [ "${#logs[@]}" -gt 0 ] || { echo unknown; return; }
+  if cat "${logs[@]}" | grep -qE '^[0-9a-f:.]+ Network controller:' \
+     || cat "${logs[@]}" | grep -E '^/[^ ]* +([^ ]+ +)?network ' | grep -qiE 'wireless|wi-fi|wlan|802\.11'; then
+    echo yes
+  elif cat "${logs[@]}" | grep -qE '^[0-9a-f:.]+ Ethernet controller:|^/[^ ]* +([^ ]+ +)?network '; then
+    echo no
+  else
+    echo unknown
+  fi
+}
+
 shopt -s nullglob
 FILES=("$LOCAL_BASE"/*/summary.csv)
 [ "${#FILES[@]}" -gt 0 ] || { echo "ERROR: no */summary.csv under $LOCAL_BASE" >&2; exit 1; }
 
 PROBLEMS=0
 TMP_OUT=$(mktemp)
-echo "$EXPECTED_HEADER" > "$TMP_OUT"
+echo "$COMBINED_HEADER" > "$TMP_OUT"
 declare -A SEEN_SERIAL
 
 for f in "${FILES[@]}"; do
@@ -65,7 +97,9 @@ for f in "${FILES[@]}"; do
     continue
   fi
   SEEN_SERIAL[$serial]="$label"
-  echo "$row" >> "$TMP_OUT"
+  wifi=$(wifi_card "$(dirname "$f")")
+  [ "$wifi" != unknown ] || echo "NOTE: $label — wifi_card unknown (no diag log, or no network hardware listed in it)." >&2
+  echo "$row,\"$wifi\"" >> "$TMP_OUT"
 done
 
 if [ "$PROBLEMS" -gt 0 ]; then

@@ -237,6 +237,10 @@ Stacks every `<machine-label>/summary.csv` into
 `le_relais_refurb_results/summary-combined.csv` — one header, one row per machine.
 Writes nothing and lists the problems if any machine's file has the wrong header or
 more/fewer than one row, or if the same `machine_serial` shows up under two labels.
+It also adds a `wifi_card` column (yes / no / unknown), read from the lspci/lshw output
+in each folder's `diag_*.txt`. `unknown` means no diag log, or no network hardware listed
+in it, and it prints a NOTE for each one. The manual Wi-Fi test in step 5 isn't
+recorded here.
 
 ### Windows Update stage — full walkthrough (steps 7–9, plus cleanup)
 
