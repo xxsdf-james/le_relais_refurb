@@ -240,7 +240,11 @@ more/fewer than one row, or if the same `machine_serial` shows up under two labe
 It also adds a `wifi_card` column (yes / no / unknown), read from the lspci/lshw output
 in each folder's `diag_*.txt`. `unknown` means no diag log, or no network hardware listed
 in it, and it prints a NOTE for each one. The manual Wi-Fi test in step 5 isn't
-recorded here.
+recorded here. Last comes a `machine_number` column: the 3-digit number typed as
+"Machine ID/label" into diagnostics.sh/erase-partition.sh, read from the
+`diag_<NNN>_*`/`erase_<NNN>_*` log filenames. It's blank (with a NOTE) if a folder
+has no logs, and the script refuses to write if one folder's logs carry two
+different numbers or two folders share one.
 
 ### Windows Update stage — full walkthrough (steps 7–9, plus cleanup)
 

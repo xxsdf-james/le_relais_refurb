@@ -9,10 +9,15 @@
 # not exactly one row, or if the same machine_serial appears in more than
 # one folder (e.g. the same machine pulled under two different labels).
 #
-# Appends one column the per-machine files don't have: wifi_card (yes / no /
+# Appends two columns the per-machine files don't have: wifi_card (yes / no /
 # unknown), read from the lspci and lshw output in that folder's diag_*.txt
-# logs. It's only in the combined file, so the per-machine schema shared with
-# diagnostics.sh and erase-partition.sh is unchanged.
+# logs, and machine_number, the 3-digit number typed as "Machine ID/label"
+# into diagnostics.sh / erase-partition.sh, read from the diag_*/erase_*
+# log filenames. They're only in the combined file, so the per-machine schema
+# shared with diagnostics.sh and erase-partition.sh is unchanged.
+#
+# Also refuses if a folder's logs carry more than one machine_number, or the
+# same number appears in more than one folder.
 
 set -euo pipefail
 
@@ -41,7 +46,7 @@ OUTPUT="${1:-$LOCAL_BASE/summary-combined.csv}"
 EXPECTED_HEADER="machine_serial,ciad_number,ram_gb,storage_type,storage_capacity_gb,drive_serial,smart_status,erase_method,erase_result,os_installed,status,date,windows_verified"
 
 # Combined file only — not part of the per-machine schema above.
-COMBINED_HEADER="$EXPECTED_HEADER,wifi_card"
+COMBINED_HEADER="$EXPECTED_HEADER,wifi_card,machine_number"
 
 # yes:     lspci lists a "Network controller" (the PCI class Wi-Fi cards use;
 #          wired cards are "Ethernet controller"), or lshw lists a network-class
@@ -67,6 +72,16 @@ wifi_card() {
   fi
 }
 
+# Prints the distinct 3-digit numbers in the folder's log filenames
+# (diag_<NNN>_<CIAD>_<stage>.txt, erase_<NNN>_<CIAD>.txt), one per line.
+# Exactly one is expected; none or several is reported by the caller.
+machine_numbers() {
+  local dir="$1" f
+  for f in "$dir"/diag_*.txt "$dir"/erase_*.txt; do
+    basename "$f"
+  done | sed -nE 's/^(diag|erase)_([0-9]{3})_.*\.txt$/\2/p' | sort -u
+}
+
 shopt -s nullglob
 FILES=("$LOCAL_BASE"/*/summary.csv)
 [ "${#FILES[@]}" -gt 0 ] || { echo "ERROR: no */summary.csv under $LOCAL_BASE" >&2; exit 1; }
@@ -75,6 +90,7 @@ PROBLEMS=0
 TMP_OUT=$(mktemp)
 echo "$COMBINED_HEADER" > "$TMP_OUT"
 declare -A SEEN_SERIAL
+declare -A SEEN_NUMBER
 
 for f in "${FILES[@]}"; do
   label=$(basename "$(dirname "$f")")
@@ -97,9 +113,25 @@ for f in "${FILES[@]}"; do
     continue
   fi
   SEEN_SERIAL[$serial]="$label"
+  numbers=$(machine_numbers "$(dirname "$f")")
+  if [ "$(echo "$numbers" | grep -c .)" -gt 1 ]; then
+    echo "PROBLEM: $label — logs carry more than one machine number: $(echo $numbers)." >&2
+    PROBLEMS=$((PROBLEMS + 1))
+    continue
+  fi
+  number="$numbers"
+  if [ -z "$number" ]; then
+    echo "NOTE: $label — machine_number blank (no diag_<NNN>_* / erase_<NNN>_* log in the folder)." >&2
+  elif [ -n "${SEEN_NUMBER[$number]:-}" ]; then
+    echo "PROBLEM: machine number $number is in both ${SEEN_NUMBER[$number]} and $label — typo when entering the label?" >&2
+    PROBLEMS=$((PROBLEMS + 1))
+    continue
+  else
+    SEEN_NUMBER[$number]="$label"
+  fi
   wifi=$(wifi_card "$(dirname "$f")")
   [ "$wifi" != unknown ] || echo "NOTE: $label — wifi_card unknown (no diag log, or no network hardware listed in it)." >&2
-  echo "$row,\"$wifi\"" >> "$TMP_OUT"
+  echo "$row,\"$wifi\",\"$number\"" >> "$TMP_OUT"
 done
 
 if [ "$PROBLEMS" -gt 0 ]; then
