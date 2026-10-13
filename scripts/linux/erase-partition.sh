@@ -86,6 +86,11 @@
 #     read back as garbage, yet the zap went through (sgdisk -p and lsblk
 #     both showed an empty disk). Zero-filled disks never hit this, which
 #     is why it only surfaced on the first crypto erase.
+#   - Marker-file verification reads with iflag=direct (bypasses the page
+#     cache) and adds a direct read of the last sector: a surviving
+#     "EFI PART" signature there fails verification. Prompted by 032,
+#     where sgdisk found a valid backup GPT header after the crypto erase
+#     (unexplained — stale cache or an incomplete erase).
 #
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
@@ -790,13 +795,40 @@ elif [ "$ERASE_EXIT" -eq 0 ]; then
   log "\n=== Verification ($VERIFY_METHOD) ==="
  
   if [ "$VERIFY_METHOD" = "marker-file" ]; then
-    READBACK=$(sudo dd if="$PRIMARY_DEV" bs=1 skip="$MARKER_OFFSET_BYTES" count="${#MARKER_STRING}" status=none 2>/dev/null)
+    # iflag=direct bypasses the kernel's page cache, so these reads come
+    # from the drive itself, not from copies cached before the erase.
+    # O_DIRECT needs block-aligned reads, hence bs=4096 + head -c rather
+    # than bs=1 (the marker offset is 1 MiB, so it's aligned).
+    READBACK=$(sudo dd if="$PRIMARY_DEV" bs=4096 skip=$(( MARKER_OFFSET_BYTES / 4096 )) count=1 iflag=direct status=none 2>/dev/null | head -c "${#MARKER_STRING}")
     if [ "$READBACK" = "$MARKER_STRING" ]; then
       VERIFY_RESULT="fail"
       log "FAIL: pre-erase marker is still readable at the same LBA offset after crypto erase. Key was not discarded as expected — treat as UNSANITIZED."
     else
       VERIFY_RESULT="pass"
       log "PASS: pre-erase marker is no longer recoverable at the same LBA offset (expected result for crypto erase — the key was discarded, so the ciphertext at that offset no longer decodes to the marker)."
+    fi
+
+    # Second check at the other end of the disk. The marker only proves
+    # the erase reached 1 MiB in. On 032 (2026-10-13), sgdisk later found
+    # a VALID backup GPT header in the last sector after a "successful"
+    # crypto erase — impossible if that sector had really been erased
+    # (random ciphertext can't pass the header's CRC). Unexplained: either
+    # sgdisk read a stale cached copy, or the erase didn't reach the end.
+    # A direct read of the last sector tells the two apart: if the
+    # "EFI PART" signature is still there, the drive itself is returning
+    # pre-erase data.
+    LBA_SIZE=$(sudo blockdev --getss "$PRIMARY_DEV" 2>/dev/null)
+    if [ -n "$LBA_SIZE" ] && [ "${CAP_BYTES:-0}" -gt 0 ]; then
+      LAST_LBA=$(( CAP_BYTES / LBA_SIZE - 1 ))
+      LAST_SIG=$(sudo dd if="$PRIMARY_DEV" bs="$LBA_SIZE" skip="$LAST_LBA" count=1 iflag=direct status=none 2>/dev/null | head -c 8)
+      if [ "$LAST_SIG" = "EFI PART" ]; then
+        VERIFY_RESULT="fail"
+        log "FAIL: last sector (LBA $LAST_LBA) still holds a GPT backup header (\"EFI PART\"), read directly from the drive. The crypto erase did not reach the end of the disk — treat as UNSANITIZED."
+      else
+        log "Last sector (LBA $LAST_LBA), read directly from the drive: no GPT signature — consistent with a full-disk erase."
+      fi
+    else
+      log "WARNING: could not read the sector size or capacity — last-sector check skipped."
     fi
     log "\n-- nvme sanitize-log (secondary, device-reported cross-check) --"
     have nvme && sudo nvme sanitize-log "$PRIMARY_DEV" 2>&1 | tee -a "$OUT" >/dev/null
