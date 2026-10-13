@@ -91,6 +91,12 @@
 #     "EFI PART" signature there fails verification. Prompted by 032,
 #     where sgdisk found a valid backup GPT header after the crypto erase
 #     (unexplained — stale cache or an incomplete erase).
+#   - NVMe "Invalid Command Opcode" no longer falls straight back to nwipe:
+#     if the machine hasn't been suspended since boot, it stops and says
+#     to suspend/resume and re-run. 032 has the same drive model and
+#     firmware (5L7QCXB7) as 001, whose rejection v3 attributed to
+#     firmware; 032 accepted --ses=2 after a suspend. Fallback still
+#     happens if the rejection persists after a suspend.
 #
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
@@ -706,6 +712,22 @@ case "$STORAGE_TYPE" in
       VERIFY_METHOD="$TRY_VERIFY"
  
     elif echo "$FORMAT_OUTPUT" | grep -qiE "invalid.?command.?opcode|INVALID_OPCODE"; then
+      # v12: suspend/resume first. On 032 (2026-10-13), the same drive
+      # model + firmware as 001 accepted --ses=2 after a suspend/resume,
+      # so this rejection is likely a BIOS-set lock cleared by resume (like
+      # the SATA freeze-lock), not missing firmware support. Only fall back
+      # to the weaker Clear-tier overwrite once a suspend has been tried
+      # this boot. /sys/power/suspend_stats/success counts successful
+      # suspends since boot; if it can't be read, ask instead.
+      SUSPEND_COUNT=$(cat /sys/power/suspend_stats/success 2>/dev/null)
+      if [ -z "$SUSPEND_COUNT" ]; then
+        read -rp "Has this machine been suspended and resumed since it booted? [y/N]: " SUSPENDED_ANS
+        [[ "$SUSPENDED_ANS" =~ ^[Yy] ]] && SUSPEND_COUNT=1 || SUSPEND_COUNT=0
+      fi
+      if [ "$SUSPEND_COUNT" -eq 0 ]; then
+        die "Format NVM rejected at the opcode level (Invalid Command Opcode) and the machine has not been suspended since boot. On 032 (2026-10-13), the same drive model accepted the crypto erase after a suspend/resume, so try that before falling back to the weaker overwrite: top-right system menu > Power > Suspend, wake the machine with the power button, then re-run this script (same directory). If it is rejected again after the suspend, the script falls back to nwipe automatically. Nothing was erased."
+      fi
+      log "\nMachine has been suspended since boot ($SUSPEND_COUNT successful suspend(s)) and Format NVM is still rejected."
       # Opcode-level rejection, not SES-specific — matches the confirmed
       # unsupported-firmware pattern (known-issues.md: this drive's oacs/fna
       # report Format NVM + crypto-erase support that isn't actually
