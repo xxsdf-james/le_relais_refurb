@@ -79,6 +79,14 @@
 #   - End-of-run message points at scripts/laptop/pull-results.sh instead
 #     of a hand-typed scp.
 #
+# v12 changes (2026-10-13, after 032/CIAD7498 — first successful NVMe
+# crypto erase, Samsung MZVLW256HEHP-000L7, after a suspend/resume):
+#   - sgdisk --zap-all exit 2 is retried once before being reported as a
+#     partition failure. On 032 it returned 2 because the crypto-erased GPT
+#     read back as garbage, yet the zap went through (sgdisk -p and lsblk
+#     both showed an empty disk). Zero-filled disks never hit this, which
+#     is why it only surfaced on the first crypto erase.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -862,6 +870,16 @@ if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ]; then
 
   run_logged "sgdisk_zap" sudo sgdisk --zap-all "$PRIMARY_DEV"
   ZAP_EXIT=$?
+  if [ "$ZAP_EXIT" -eq 2 ]; then
+    # Exit 2 = "error reading the partition table" (man sgdisk), not a
+    # failed zap: after a crypto erase the old GPT reads back as garbage,
+    # sgdisk complains while loading it, then destroys it anyway (032,
+    # 2026-10-13). A second pass sees no GPT at all and exits 0 if the
+    # first one actually worked; a real write failure fails again.
+    log "sgdisk exit 2 is a load-time error (corrupt GPT read back after the erase), not necessarily a failed zap — re-running once to confirm."
+    run_logged "sgdisk_zap_retry" sudo sgdisk --zap-all "$PRIMARY_DEV"
+    ZAP_EXIT=$?
+  fi
   have partprobe && sudo partprobe "$PRIMARY_DEV" 2>&1 | tee -a "$OUT" >/dev/null
 
   if [ "$ZAP_EXIT" -eq 0 ]; then
