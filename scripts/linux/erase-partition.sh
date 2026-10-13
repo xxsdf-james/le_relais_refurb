@@ -104,6 +104,8 @@
 #     start of the EFI partition on a Windows disk) is backed up first and
 #     written back if Format NVM is refused, so a refused format leaves
 #     the disk unchanged.
+#   - The NVMe nwipe fallback now asks first (default No). Declining stops
+#     the script with nothing erased. Doesn't depend on summary.csv.
 #
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
@@ -755,6 +757,19 @@ case "$STORAGE_TYPE" in
         die "Format NVM rejected at the opcode level (Invalid Command Opcode) and the machine has not been suspended since boot. On 032 (2026-10-13), the same drive model accepted the crypto erase after a suspend/resume, so try that before falling back to the weaker overwrite: top-right system menu > Power > Suspend, wake the machine with the power button, then re-run this script (same directory). If it is rejected again after the suspend, the script falls back to nwipe automatically. Nothing was erased."
       fi
       log "\nMachine has been suspended since boot ($SUSPEND_COUNT successful suspend(s)) and Format NVM is still rejected."
+      # v13: ask before the fallback. A machine being redone (already
+      # zero-filled once) gains nothing from a second overwrite, and it
+      # destroys the Windows install on it (022, 2026-10-13). Default No.
+      echo ""
+      echo "No Purge-tier erase is possible on this drive. The only option left is a"
+      echo "Clear-tier zero-fill with nwipe (~50 min for 256 GB). It DESTROYS everything"
+      echo "on the disk, including any Windows install. If this machine has already"
+      echo "been zero-filled once, a second pass adds nothing — answer N."
+      read -rp "Run the nwipe zero-fill now? [y/N]: " NWIPE_ANS
+      if ! [[ "$NWIPE_ANS" =~ ^[Yy] ]]; then
+        die "nwipe fallback declined by technician. Format NVM was refused and nothing was erased; see the log above for whether the marker block was restored."
+      fi
+      log "Technician confirmed the nwipe fallback."
       # Opcode-level rejection, not SES-specific — matches the confirmed
       # unsupported-firmware pattern (known-issues.md: this drive's oacs/fna
       # report Format NVM + crypto-erase support that isn't actually
