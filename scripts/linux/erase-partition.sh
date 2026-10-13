@@ -98,6 +98,13 @@
 #     firmware; 032 accepted --ses=2 after a suspend. Fallback still
 #     happens if the rejection persists after a suspend.
 #
+# v13 changes (2026-10-13, after 022/CIAD7448 was redone and lost its
+# Windows install for nothing):
+#   - The 4 KiB block the crypto-erase marker overwrites (1 MiB in, the
+#     start of the EFI partition on a Windows disk) is backed up first and
+#     written back if Format NVM is refused, so a refused format leaves
+#     the disk unchanged.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -693,7 +700,16 @@ case "$STORAGE_TYPE" in
       TRY_VERIFY="readback-sample"
     fi
  
+    MARKER_BACKUP=""
     if [ "$TRY_VERIFY" = "marker-file" ]; then
+      # v13: save the block the marker overwrites, so a refused format can
+      # put it back. On a disk with Windows on it, 1 MiB is the first
+      # sector of the EFI partition (022: boot entry at 0x800), so an
+      # unrestored marker leaves Windows unbootable even though nothing
+      # was erased. Kept in /tmp (the live session's RAM), not results/.
+      MARKER_BACKUP=$(mktemp)
+      sudo dd if="$PRIMARY_DEV" of="$MARKER_BACKUP" bs=4096 skip=$(( MARKER_OFFSET_BYTES / 4096 )) count=1 iflag=direct status=none \
+        || die "Could not read the 4 KiB block at the marker offset before writing the marker. Nothing was written or erased."
       MARKER_STRING="LERELAIS-ERASE-MARKER-$(date +%s)-$$"
       log "\n-- Writing pre-erase marker for independent verification --"
       log "Marker offset: ${MARKER_OFFSET_BYTES} bytes; marker: $MARKER_STRING"
@@ -705,7 +721,18 @@ case "$STORAGE_TYPE" in
     log "\n\$ sudo nvme format $PRIMARY_DEV --ses=$TRY_SES --force"
     echo "$FORMAT_OUTPUT" | tee -a "$OUT" >/dev/null
     log "[nvme_format_attempt] exit_status=$FORMAT_EXIT"
- 
+
+    if [ "$FORMAT_EXIT" -ne 0 ] && [ -n "$MARKER_BACKUP" ]; then
+      # Format refused: put back the block the marker overwrote, so the
+      # disk is exactly as it was before this script ran.
+      sudo dd if="$MARKER_BACKUP" of="$PRIMARY_DEV" bs=4096 seek=$(( MARKER_OFFSET_BYTES / 4096 )) count=1 oflag=direct conv=notrunc,fsync status=none
+      if sudo dd if="$PRIMARY_DEV" bs=4096 skip=$(( MARKER_OFFSET_BYTES / 4096 )) count=1 iflag=direct status=none | cmp -s - "$MARKER_BACKUP"; then
+        log "Format refused — original 4 KiB block at the marker offset restored and read back. The disk is unchanged."
+      else
+        log "WARNING: format refused and restoring the original block at the marker offset FAILED. The disk is not erased, but a Windows install on it may no longer boot."
+      fi
+    fi
+
     if [ "$FORMAT_EXIT" -eq 0 ]; then
       ERASE_METHOD="$TRY_LABEL"
       ERASE_EXIT=0
