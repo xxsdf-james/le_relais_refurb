@@ -107,6 +107,13 @@
 #   - The NVMe nwipe fallback now asks first (default No). Declining stops
 #     the script with nothing erased. Doesn't depend on summary.csv.
 #
+# v14 changes (2026-10-14, after 036/FR1589 turned up a second internal
+# disk, a 32 GB mSATA cache SSD next to the HDD):
+#   - Drive detection counts NVMe and SATA disks together before choosing
+#     one, and stops if there is more than one. The per-bus checks already
+#     stopped on two SATA or two NVMe disks, but one NVMe + one SATA took
+#     the NVMe branch and left the SATA disk unwiped with no warning.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -468,6 +475,15 @@ STORAGE_TYPE="unknown"
  
 NVME_CANDIDATES=$(ls /dev/nvme?n1 2>/dev/null)
 NVME_COUNT=$(echo "$NVME_CANDIDATES" | grep -c . || true)
+ 
+# v14: count NVMe and SATA disks together. The per-branch counts below only
+# see one bus each, so one NVMe + one SATA disk took the NVMe branch and
+# left the SATA disk unwiped without a word.
+ALL_INTERNAL=$( { echo "$NVME_CANDIDATES"; have lsblk && lsblk -dno NAME,TYPE,TRAN,RM 2>/dev/null | awk '$2=="disk" && $3!="usb" && $4==0 {print "/dev/"$1}'; } | grep . | sort -u)
+ALL_INTERNAL_COUNT=$(echo "$ALL_INTERNAL" | grep -c . || true)
+if [ "$ALL_INTERNAL_COUNT" -gt 1 ]; then
+  die "Multiple internal disks detected ($(echo $ALL_INTERNAL)). Multi-disk machines are out of scope: every disk needs sanitizing, not just one. Remove or deal with the extra disk manually, then re-run."
+fi
  
 if [ "$NVME_COUNT" -gt 1 ]; then
   die "Multiple NVMe devices detected ($NVME_CANDIDATES). Multi-disk machines are out of scope (see methodology.md single-disk assumption) — resolve manually, do not proceed automatically."
