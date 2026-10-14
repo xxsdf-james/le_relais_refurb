@@ -9,6 +9,14 @@
 # scope (activation only exists inside a booted Windows session; it's checked
 # there, see toolkit-reference.md).
 #
+# v0.10 changes (2026-10-14, after 036/FR1589 turned up a second internal
+# disk, a 32 GB mSATA cache SSD next to the HDD):
+#   - Counts every internal disk (NVMe and SATA together) and, if there is
+#     more than one, prints a WARNING block listing them after the
+#     sanitization recommendation. Previously only the first disk was
+#     assessed and the rest were left out without a word; on 036 the extra
+#     disk showed up only in the hardware summary.
+#
 # v0.9 changes (2026-09-29):
 #   - Stage prompt now only accepts before/after (case-insensitive) and asks
 #     again otherwise. Previously "After" (or any typo) was taken as-is: the
@@ -267,6 +275,12 @@ elif have lsblk; then
   fi
 fi
  
+# v0.10: every internal disk, NVMe and SATA together (same filter as
+# erase-partition.sh v14). PRIMARY_DEV above is only the first of these;
+# any others would be left out of the recommendation below.
+ALL_INTERNAL=$( { ls /dev/nvme?n1 2>/dev/null; have lsblk && lsblk -dno NAME,TYPE,TRAN,RM 2>/dev/null | awk '$2=="disk" && $3!="usb" && $4==0 {print "/dev/"$1}'; } | grep . | sort -u)
+ALL_INTERNAL_COUNT=$(echo "$ALL_INTERNAL" | grep -c . || true)
+ 
 # --- Drive's own identity (separate from the machine identity above) --------
 # This is the number erase-partition.sh's pre-sanitize cross-check matches
 # against — it proves the physical drive under the screwdriver is the one
@@ -371,6 +385,15 @@ else
       log "Drive type not determined — resolve manually before choosing a method."
       ;;
   esac
+fi
+ 
+if [ "$ALL_INTERNAL_COUNT" -gt 1 ]; then
+  log "\n=== WARNING: MORE THAN ONE INTERNAL DISK ($ALL_INTERNAL_COUNT) ==="
+  have lsblk && lsblk -dno NAME,SIZE,TRAN,ROTA,MODEL $ALL_INTERNAL 2>&1 | tee -a "$OUT"
+  log "Only $PRIMARY_DEV was assessed above, and the recommendation covers only"
+  log "that disk. Every other disk may also hold user data (e.g. an mSATA cache"
+  log "SSD). erase-partition.sh will refuse to run until only one internal disk"
+  log "remains: remove the extra disk(s) and sanitize them separately."
 fi
  
 # --- UEFI / boot mode ----------------------------------------------------------
