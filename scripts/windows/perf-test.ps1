@@ -29,7 +29,8 @@
         nothing to fix.
     -Report [-SkipWinsat]
         Adds Windows' own boot timings (Diagnostics-Performance event 100),
-        runs "winsat disk", summarises everything, writes
+        runs "winsat disk" (needs the desktop: run -Report at the machine's
+        screen, not over SSH), summarises everything, writes
         results\report-<label>.csv and prints it with a SHA-256 to check
         after copying it off the machine. On the laptop:
           printf '%s' "$(tr -d '\r' < report-H1.csv)" | sha256sum
@@ -198,10 +199,12 @@ if ($Setup) {
     }
 
     # Script folder: only SYSTEM and Administrators may write, because the
-    # task runs whatever is in it. Results folder: perftest may write too
-    # (its task runs with a non-elevated token, which doesn't count as admin).
+    # task runs whatever is in it; Users may read and run it, because the task
+    # runs as perftest with a non-elevated token, which doesn't count as
+    # admin (without this read grant powershell can't open the script and the
+    # task ends at once with 0xFFFD0000). Results folder: perftest may write too.
     New-Item -ItemType Directory -Path $Dir, $ResDir -Force | Out-Null
-    & icacls.exe $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /T /Q | Out-Null
+    & icacls.exe $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /T /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "icacls failed on $Dir" }
     Copy-Item $PSCommandPath (Join-Path $Dir 'perf-test.ps1') -Force
 
@@ -227,6 +230,9 @@ if ($Setup) {
     Set-ItemProperty $Winlogon DefaultUserName $User
     Set-ItemProperty $Winlogon DefaultDomainName $env:COMPUTERNAME
     Set-ItemProperty $Winlogon DefaultPassword $plain
+    # A count left by an unattended install (the test VM had 9996) makes
+    # Windows stop auto-logon when it reaches 0, possibly mid-test.
+    Remove-ItemProperty $Winlogon AutoLogonCount -ErrorAction SilentlyContinue
 
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
         "-NoProfile -ExecutionPolicy Bypass -File `"$Dir\perf-test.ps1`" -Cycle")
@@ -287,6 +293,8 @@ public static extern uint SetThreadExecutionState(uint esFlags);
         Write-Host 'WARM-UP (not measured)'
         Write-Host 'Open Word, Excel and Edge once each, click through every first-run'
         Write-Host 'screen (privacy, sign-in prompts: skip or close), then close them.'
+        Write-Host 'Then click THIS window''s title bar (not inside it: that starts text'
+        Write-Host 'selection and the window ignores Enter until another key is pressed).'
         Read-Host 'Press Enter here when done; the machine restarts and measuring starts'
         Set-Content $StateFile 'RUNNING' -Encoding ASCII
         Restart-Now 'warm-up done'
@@ -404,14 +412,28 @@ if ($Report) {
         }
     }
 
+    # winsat's XML, not its console text: the text is translated (French on
+    # these machines), the XML's kind="..." labels and numbers are not.
+    # winsat needs a desktop (it creates a Direct3D device even for the disk
+    # test): from an SSH session it fails with exit 24 and writes nothing.
     if (-not $SkipWinsat) {
-        Write-Host 'Running winsat disk (1-2 min)...'
-        $ws = & winsat.exe disk -drive c 2>&1 | Out-String
-        foreach ($p in @(@('Random 16\.0 Read', 'winsat_random_read_mbs'), @('Sequential 64\.0 Read', 'winsat_seq_read_mbs'))) {
-            if ($ws -match "$($p[0])\s+([\d.,]+)\s*MB/s") { Add-Out 'disk' '' $p[1] ($Matches[1] -replace ',', '.') }
-            else { Write-Host "WARNING winsat: '$($p[0])' not found in its output" -ForegroundColor Yellow }
+        Write-Host 'Running winsat disk (under a minute on an SSD, longer on a hard disk)...'
+        $wx = Join-Path $ResDir 'winsat.xml'
+        Remove-Item $wx -ErrorAction SilentlyContinue
+        & winsat.exe disk -drive c -xml $wx 2>&1 | Out-Null
+        $wsExit = $LASTEXITCODE
+        if ($wsExit -ne 0 -or -not (Test-Path $wx)) {
+            Write-Host "WARNING winsat failed (exit $wsExit): run -Report from a PowerShell window at the machine's own screen, not over SSH" -ForegroundColor Yellow
+        } else {
+            $dm = ([xml](Get-Content $wx)).WinSAT.Metrics.DiskMetrics
+            foreach ($p in @(@('Random Read', 'winsat_random_read_mbs'), @('Sequential Read', 'winsat_seq_read_mbs'))) {
+                $n = @($dm.AvgThroughput | Where-Object { $_.kind -eq $p[0] })
+                if ($n.Count) { Add-Out 'disk' '' $p[1] $n[0].'#text' }
+                else { Write-Host "WARNING winsat: no '$($p[0])' in $wx" -ForegroundColor Yellow }
+            }
+            $lat = @($dm.MeanLatency | Where-Object { $_.Kind -eq 'Read With Random Background Writes' })
+            if ($lat.Count) { Add-Out 'disk' '' 'winsat_read_latency_us' $lat[0].'#text' }
         }
-        Set-Content (Join-Path $ResDir 'winsat.txt') $ws -Encoding ASCII
     }
 
     foreach ($f in @(Get-ChildItem $ResDir -Filter 'monitor-*.csv')) {
