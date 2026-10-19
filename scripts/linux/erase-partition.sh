@@ -114,6 +114,25 @@
 #     stopped on two SATA or two NVMe disks, but one NVMe + one SATA took
 #     the NVMe branch and left the SATA disk unwiped with no warning.
 #
+# v15 changes (2026-10-19, multi-disk support, paired with diagnostics.sh
+# v0.11 — for the EliteOne 800 G1s' HDD + mSATA cache SSD):
+#   - More than one internal disk no longer stops the script. It lists the
+#     disks and asks which one to erase; run it once per disk. Each run is
+#     a normal single-disk run (same confirmation, method, verification and
+#     zap) on the disk picked.
+#   - On such a machine the cross-check uses results/drives.csv (written by
+#     diagnostics.sh v0.11, one row per disk) instead of summary.csv's
+#     drive_serial, which only holds the first disk. Each disk's result goes
+#     in its own drives.csv row; summary.csv's erase_result is "pass" only
+#     once every disk in drives.csv has passed, "incomplete (N/M disks)"
+#     until then, and status only advances at that point.
+#   - The rules apply whenever drives.csv lists this machine, even if only
+#     one disk is still in it, so pulling a disk out before it's erased
+#     can't make the machine read as fully erased.
+#   - Per-disk report and checkpoint files:
+#     erase_<label>_<CIAD>_<drive serial>.txt, state_..._<drive serial>.env.
+#   - Single-disk machines without a drives.csv: no change in behavior.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -481,11 +500,49 @@ NVME_COUNT=$(echo "$NVME_CANDIDATES" | grep -c . || true)
 # left the SATA disk unwiped without a word.
 ALL_INTERNAL=$( { echo "$NVME_CANDIDATES"; have lsblk && lsblk -dno NAME,TYPE,TRAN,RM 2>/dev/null | awk '$2=="disk" && $3!="usb" && $4==0 {print "/dev/"$1}'; } | grep . | sort -u)
 ALL_INTERNAL_COUNT=$(echo "$ALL_INTERNAL" | grep -c . || true)
-if [ "$ALL_INTERNAL_COUNT" -gt 1 ]; then
-  die "Multiple internal disks detected ($(echo $ALL_INTERNAL)). Multi-disk machines are out of scope: every disk needs sanitizing, not just one. Remove or deal with the extra disk manually, then re-run."
+
+# v15: a machine diagnosed with more than one disk has its disks in
+# drives.csv (diagnostics.sh v0.11). If this machine is listed there, the
+# per-disk rules apply (§3, §8), however many disks are still in it.
+DRIVES_CSV="$RESULTS_DIR/drives.csv"
+DRIVES_HEADER="machine_serial,drive_serial,storage_type,storage_capacity_gb,drive_model,erase_method,erase_result,partition_status,date"
+DRIVES_ROWS=""
+if [ -f "$DRIVES_CSV" ]; then
+  [ "$(head -n1 "$DRIVES_CSV")" = "$DRIVES_HEADER" ] || die "$DRIVES_CSV doesn't have the expected header — fix it by hand before proceeding. Nothing was erased."
+  DRIVES_ROWS=$(awk -F',' -v ms="\"$SERIAL\"" '$1==ms' "$DRIVES_CSV")
 fi
- 
-if [ "$NVME_COUNT" -gt 1 ]; then
+MULTI_DISK=0
+[ -n "$DRIVES_ROWS" ] && MULTI_DISK=1
+
+if [ "$ALL_INTERNAL_COUNT" -gt 1 ]; then
+  [ "$MULTI_DISK" -eq 1 ] || die "Multiple internal disks detected ($(echo $ALL_INTERNAL)), but drives.csv has no record of this machine's disks. Re-run diagnostics.sh (v0.11 or later, stage 'before') in this same directory so every disk's serial is recorded, then re-run this script. Nothing was erased."
+  log "More than one internal disk. Each needs its own run of this script."
+  i=0
+  for dev in $ALL_INTERNAL; do
+    i=$((i + 1))
+    if [[ "$dev" == /dev/nvme* ]]; then
+      D_SERIAL=$(sudo nvme id-ctrl "$dev" 2>/dev/null | awk -F': *' '/^sn[[:space:]]*:/{print $2; exit}' | tr -d '[:space:]')
+    else
+      D_SERIAL=$(sudo smartctl -i "$dev" 2>/dev/null | awk -F': *' '/Serial Number/{print $2; exit}' | tr -d '[:space:]')
+    fi
+    D_RESULT=$(echo "$DRIVES_ROWS" | awk -F',' -v ds="\"$D_SERIAL\"" '$2==ds {gsub(/"/,"",$7); print ($7=="" ? "not erased yet" : "erase_result=" $7); exit}')
+    [ -z "$D_RESULT" ] && D_RESULT="NOT in drives.csv"
+    log "  $i) $dev  $(lsblk -dno SIZE,MODEL "$dev" 2>/dev/null | tr -s ' ')  serial ${D_SERIAL:-unknown}  [$D_RESULT]"
+  done
+  read -rp "Which disk to erase in this run? [1-$ALL_INTERNAL_COUNT]: " DISK_PICK
+  [[ "$DISK_PICK" =~ ^[0-9]+$ ]] && [ "$DISK_PICK" -ge 1 ] && [ "$DISK_PICK" -le "$ALL_INTERNAL_COUNT" ] \
+    || die "'$DISK_PICK' is not one of the numbers listed. Nothing was erased."
+  PRIMARY_DEV=$(echo "$ALL_INTERNAL" | sed -n "${DISK_PICK}p")
+  if [[ "$PRIMARY_DEV" == /dev/nvme* ]]; then
+    STORAGE_TYPE="NVMe"
+  elif [ "$(lsblk -dno ROTA "$PRIMARY_DEV" 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+    STORAGE_TYPE="SATA HDD (rotational)"
+  else
+    STORAGE_TYPE="SATA SSD (non-rotational)"
+  fi
+  log "Picked: $PRIMARY_DEV"
+
+elif [ "$NVME_COUNT" -gt 1 ]; then
   die "Multiple NVMe devices detected ($NVME_CANDIDATES). Multi-disk machines are out of scope (see methodology.md single-disk assumption) — resolve manually, do not proceed automatically."
 elif [ "$NVME_COUNT" -eq 1 ]; then
   PRIMARY_DEV="$NVME_CANDIDATES"
@@ -534,7 +591,18 @@ log "Drive serial    : $DRIVE_SERIAL"
 log "Capacity        : ${CAP_GB} GB"
  
 [ "$DRIVE_SERIAL" = "unknown" ] && die "Could not read the drive's own serial number — cannot safely confirm identity before a destructive operation. Investigate manually."
- 
+
+# v15: one report and one checkpoint per disk on a multi-disk machine, so
+# the second disk's run doesn't overwrite the first one's report.
+if [ "$MULTI_DISK" -eq 1 ]; then
+  SAFE_DRIVE_SERIAL="${DRIVE_SERIAL//\//_}"
+  DISK_OUT="$RESULTS_DIR/erase_${MACHINE_ID}_${CIAD_NUMBER}_${SAFE_DRIVE_SERIAL}.txt"
+  mv -f "$OUT" "$DISK_OUT"
+  OUT="$DISK_OUT"
+  STATE_FILE="$RESULTS_DIR/state_${MACHINE_ID}_${CIAD_NUMBER}_${SAFE_DRIVE_SERIAL}.env"
+  log "Report for this disk: $OUT"
+fi
+
 # ============================================================================
 # 2b. Resume check — is there a checkpoint from a previous run on THIS drive?
 #
@@ -612,7 +680,17 @@ if [ "$RECORDED_CIAD" != "$CIAD_NUMBER" ]; then
   log "hasn't genuinely changed. This run will update the row's CIAD to $CIAD_NUMBER."
 fi
  
-RECORDED_DRIVE_SERIAL=$(echo "$MACHINE_ROWS" | awk -F',' '{print $6}' | tr -d '"')
+if [ "$MULTI_DISK" -eq 1 ]; then
+  # v15: summary.csv's drive_serial only holds the first disk. Every disk's
+  # serial is in drives.csv.
+  if ! echo "$DRIVES_ROWS" | awk -F',' -v ds="\"$DRIVE_SERIAL\"" '$2==ds {found=1} END {exit !found}'; then
+    die "This machine has a drives.csv record, but drive serial $DRIVE_SERIAL is not in it (recorded: $(echo "$DRIVES_ROWS" | awk -F',' '{gsub(/"/,"",$2); printf "%s ", $2}')). This disk wasn't in the opening diagnostic, or was swapped since. Investigate before proceeding — not proceeding automatically."
+  fi
+  RECORDED_DRIVE_SERIAL="$DRIVE_SERIAL"
+  log "Disk serial $DRIVE_SERIAL is one of this machine's disks recorded in drives.csv."
+else
+  RECORDED_DRIVE_SERIAL=$(echo "$MACHINE_ROWS" | awk -F',' '{print $6}' | tr -d '"')
+fi
 if [ -z "$RECORDED_DRIVE_SERIAL" ] || [ "$RECORDED_DRIVE_SERIAL" = "unknown" ]; then
   die "Found this machine's row, but it has no drive_serial recorded (empty or 'unknown'). Re-run diagnostics.sh on this machine so the opening diagnostic actually captures the drive's serial, then re-run this script."
 fi
@@ -1067,7 +1145,40 @@ else
   NEW_ERASE_RESULT="fail"
   NEW_STATUS=""   # leave existing status untouched below — nothing new succeeded
 fi
- 
+
+# v15: on a multi-disk machine, record this disk's result in its own
+# drives.csv row first, then derive summary.csv's erase columns from all of
+# this machine's disks. The machine only counts as erased once every disk
+# listed for it has passed.
+DISKS_LEFT=0
+if [ "$MULTI_DISK" -eq 1 ]; then
+  D_TMP=$(mktemp)
+  awk -F',' -v OFS=',' -v ms="\"$SERIAL\"" -v ds="\"$DRIVE_SERIAL\"" \
+      -v m="\"$SAFE_ERASE_METHOD\"" -v r="\"$NEW_ERASE_RESULT\"" -v p="\"$PARTITION_STATUS\"" -v d="\"$(date -I)\"" \
+      'NR>1 && $1==ms && $2==ds {$6=m; $7=r; $8=p; $9=d} {print}' "$DRIVES_CSV" > "$D_TMP"
+  mv "$D_TMP" "$DRIVES_CSV"
+  log "Recorded this disk in drives.csv: erase_result=$NEW_ERASE_RESULT partition_status=$PARTITION_STATUS."
+
+  DRIVES_ROWS=$(awk -F',' -v ms="\"$SERIAL\"" '$1==ms' "$DRIVES_CSV")
+  DISKS_TOTAL=$(echo "$DRIVES_ROWS" | grep -c . || true)
+  DISKS_PASSED=$(echo "$DRIVES_ROWS" | awk -F',' '$7=="\"pass\""' | grep -c . || true)
+  DISKS_ZAPPED=$(echo "$DRIVES_ROWS" | awk -F',' '$7=="\"pass\"" && $8=="\"ok\""' | grep -c . || true)
+  DISKS_LEFT=$(( DISKS_TOTAL - DISKS_PASSED ))
+  SAFE_ERASE_METHOD=$(echo "$DRIVES_ROWS" | awk -F',' '{gsub(/"/,"",$2); gsub(/"/,"",$6); if ($6 != "") printf "%s%s [%s]", (n++ ? " + " : ""), $6, $2}')
+  if [ "$DISKS_LEFT" -eq 0 ]; then
+    NEW_ERASE_RESULT="pass"
+    if [ "$DISKS_ZAPPED" -eq "$DISKS_TOTAL" ]; then
+      NEW_STATUS="partitioned"
+    else
+      NEW_STATUS="erased"
+    fi
+  else
+    NEW_ERASE_RESULT="incomplete (${DISKS_PASSED}/${DISKS_TOTAL} disks)"
+    NEW_STATUS=""   # not erased until every disk is
+  fi
+  log "All disks for this machine: ${DISKS_PASSED}/${DISKS_TOTAL} passed."
+fi
+
 TMP_CSV=$(mktemp)
 UPDATED=0
 {
@@ -1125,6 +1236,11 @@ echo "Done."
 echo "Full report    : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
 echo "Erase status   : exit=$ERASE_EXIT, verify=$VERIFY_RESULT, partition=$PARTITION_STATUS"
+if [ "$DISKS_LEFT" -gt 0 ]; then
+  echo ""
+  echo "*** $DISKS_LEFT of this machine's disks NOT erased yet (see drives.csv). Re-run"
+  echo "*** this script and pick the next disk before installing Windows."
+fi
 echo "This live session is not permanent storage — once enable-ssh.sh has been"
 echo "run on this machine, pull these from the laptop (docs/toolkit-reference.md):"
 echo "  scripts/laptop/pull-results.sh <this-machine-ip> <machine-label>"

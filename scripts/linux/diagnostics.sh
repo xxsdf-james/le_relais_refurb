@@ -9,6 +9,18 @@
 # scope (activation only exists inside a booted Windows session; it's checked
 # there, see toolkit-reference.md).
 #
+# v0.11 changes (2026-10-19, multi-disk support, paired with
+# erase-partition.sh v15):
+#   - On a machine with more than one internal disk, every disk's type,
+#     capacity, model and own serial are read and logged, and upserted into
+#     results/drives.csv (one row per disk, keyed on machine_serial +
+#     drive_serial). erase-partition.sh v15 cross-checks each disk against
+#     that file and records each disk's erase result in it. Its erase
+#     columns are carried over untouched on a re-run.
+#   - summary.csv is unchanged (same 13 columns). Its drive_serial and
+#     storage columns still describe the first disk only.
+#   - Single-disk machines: no drives.csv, no change in behavior.
+#
 # v0.10 changes (2026-10-14, after 036/FR1589 turned up a second internal
 # disk, a 32 GB mSATA cache SSD next to the HDD):
 #   - Counts every internal disk (NVMe and SATA together) and, if there is
@@ -248,9 +260,9 @@ log "\n=== CPU ==="
 have lscpu && lscpu 2>&1 | tee -a "$OUT"
  
 # --- Storage: detect the primary drive, classify it, collect health data -----
-# Assumption: one primary internal storage device per machine (see
-# methodology.md — the workflow doesn't handle multi-disk machines). USB
-# boot media is excluded from candidacy.
+# The first internal disk found is assessed in full here and goes in
+# summary.csv. If there are more (v0.11), every disk is also recorded in
+# drives.csv further down. USB boot media is excluded from candidacy.
 log "\n=== Storage Detection ==="
  
 PRIMARY_DEV=""
@@ -392,8 +404,86 @@ if [ "$ALL_INTERNAL_COUNT" -gt 1 ]; then
   have lsblk && lsblk -dno NAME,SIZE,TRAN,ROTA,MODEL $ALL_INTERNAL 2>&1 | tee -a "$OUT"
   log "Only $PRIMARY_DEV was assessed above, and the recommendation covers only"
   log "that disk. Every other disk may also hold user data (e.g. an mSATA cache"
-  log "SSD). erase-partition.sh will refuse to run until only one internal disk"
-  log "remains: remove the extra disk(s) and sanitize them separately."
+  log "SSD). Each disk is listed below and recorded in drives.csv: run"
+  log "erase-partition.sh once per disk, picking a different one each time."
+
+  # v0.11: identity read the same way as the primary disk above (same tools,
+  # same fields), since erase-partition.sh matches against these serials.
+  DRIVES_CSV="$RESULTS_DIR/drives.csv"
+  DRIVES_HEADER="machine_serial,drive_serial,storage_type,storage_capacity_gb,drive_model,erase_method,erase_result,partition_status,date"
+  [ -f "$DRIVES_CSV" ] || echo "$DRIVES_HEADER" > "$DRIVES_CSV"
+  if [ "$(head -n1 "$DRIVES_CSV")" != "$DRIVES_HEADER" ]; then
+    log "WARNING: drives.csv's header doesn't match the current schema — not updating it."
+    log "erase-partition.sh will refuse to run on this machine until it's fixed by hand."
+  else
+    for dev in $ALL_INTERNAL; do
+      D_TYPE="unknown"; D_SERIAL="unknown"; D_MODEL="unknown"; D_CAP_GB="unknown"
+      case "$dev" in
+        /dev/nvme*)
+          D_TYPE="NVMe"
+          if have nvme; then
+            D_ID=$(sudo nvme id-ctrl "$dev" 2>/dev/null)
+            D_SERIAL=$(echo "$D_ID" | awk -F': *' '/^sn[[:space:]]*:/{print $2; exit}' | tr -d '[:space:]')
+            D_MODEL=$(echo "$D_ID" | awk -F': *' '/^mn[[:space:]]*:/{print $2; exit}')
+          fi
+          ;;
+        *)
+          if [ "$(lsblk -dno ROTA "$dev" 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+            D_TYPE="SATA HDD (rotational)"
+          else
+            D_TYPE="SATA SSD (non-rotational)"
+          fi
+          if have smartctl; then
+            D_ID=$(sudo smartctl -i "$dev" 2>/dev/null)
+            D_SERIAL=$(echo "$D_ID" | awk -F': *' '/Serial Number/{print $2; exit}' | tr -d '[:space:]')
+            D_MODEL=$(echo "$D_ID" | awk -F': *' '/Device Model|Model Number/{print $2; exit}')
+          fi
+          ;;
+      esac
+      [ -z "$D_SERIAL" ] && D_SERIAL="unknown"
+      [ -z "$D_MODEL" ] && D_MODEL="unknown"
+      D_MODEL=$(echo "$D_MODEL" | tr ',' ';')
+      D_CAP_BYTES=$(lsblk -bdno SIZE "$dev" 2>/dev/null)
+      [ -n "$D_CAP_BYTES" ] && D_CAP_GB=$(( D_CAP_BYTES / 1000 / 1000 / 1000 ))
+
+      log "\n--- $dev ---"
+      log "Type     : $D_TYPE"
+      log "Model    : $D_MODEL"
+      log "Serial   : $D_SERIAL   (drive's own serial)"
+      log "Capacity : ${D_CAP_GB} GB"
+      if have smartctl; then
+        log "SMART    : $(sudo smartctl -H "$dev" 2>/dev/null | awk -F': ' '/overall-health/{print $2}')"
+      fi
+      if [ "$D_SERIAL" = "unknown" ]; then
+        log "WARNING: could not read this disk's serial — not recorded in drives.csv,"
+        log "so erase-partition.sh won't be able to erase it. Investigate first."
+        continue
+      fi
+
+      # Upsert on (machine_serial, drive_serial). erase_method, erase_result
+      # and partition_status belong to erase-partition.sh: kept as they were.
+      D_ROW_PREFIX="\"$SERIAL\",\"$D_SERIAL\",\"$D_TYPE\",\"$D_CAP_GB\",\"$D_MODEL\""
+      D_TMP=$(mktemp)
+      D_MATCHED=0
+      {
+        IFS= read -r hdr_line
+        echo "$hdr_line"
+        while IFS= read -r row; do
+          ROW_MS=$(echo "$row" | awk -F',' '{print $1}' | tr -d '"')
+          ROW_DS=$(echo "$row" | awk -F',' '{print $2}' | tr -d '"')
+          if [ "$ROW_MS" = "$SERIAL" ] && [ "$ROW_DS" = "$D_SERIAL" ]; then
+            D_MATCHED=1
+            echo "$D_ROW_PREFIX,$(echo "$row" | awk -F',' -v OFS=',' '{print $6,$7,$8}'),\"$(date -I)\""
+          else
+            echo "$row"
+          fi
+        done
+      } < "$DRIVES_CSV" > "$D_TMP"
+      [ "$D_MATCHED" -eq 0 ] && echo "$D_ROW_PREFIX,\"\",\"\",\"\",\"$(date -I)\"" >> "$D_TMP"
+      mv "$D_TMP" "$DRIVES_CSV"
+    done
+    log "\nRecorded in $DRIVES_CSV."
+  fi
 fi
  
 # --- UEFI / boot mode ----------------------------------------------------------
