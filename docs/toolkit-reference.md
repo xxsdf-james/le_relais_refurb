@@ -77,6 +77,11 @@ this — it's kept for when that phase resumes.
    erase-partition.sh` — no sudo): sanitizes the drive (method by drive type,
    methodology.md §4), zaps any leftover GPT/MBR structure, leaves the disk fully
    unallocated. It does NOT partition or create an ESP — Windows Setup does that itself.
+   **More than one internal disk** (e.g. the EliteOne 800 G1's HDD + mSATA cache SSD):
+   diagnostics.sh records every disk in `results/drives.csv`; run erase-partition.sh
+   once per disk, picking a different disk each time, with all disks still installed.
+   The machine only counts as erased (`erase_result=pass`) once every disk has passed.
+   Take an extra disk out only after its own run has passed.
    Then, before leaving this live session, pull its results (diag_before, erase log,
    summary.csv) from the laptop with `scripts/laptop/pull-results.sh` — the Windows
    install in step 5 wipes this session, and this summary.csv row is the one closing

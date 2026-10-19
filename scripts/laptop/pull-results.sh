@@ -2,7 +2,8 @@
 # Runs on the laptop, not a target machine — not part of the
 # raw.githubusercontent.com delivery path (CLAUDE.md, "Delivery to target
 # machines"). Pulls one machine's results/ (diag_*.txt + erase_*.txt +
-# summary.csv) from an Ubuntu Live session over SSH, per docs/ssh-access.md.
+# summary.csv, plus drives.csv on a multi-disk machine) from an Ubuntu Live
+# session over SSH, per docs/ssh-access.md.
 #
 # summary.csv lands as <machine-label>/summary.csv. The closing session's
 # copy is a superset of the opening one (push-summary.sh sends the opening
@@ -91,6 +92,20 @@ if [ -f "$SUMMARY_DEST" ]; then
   echo "Backed up existing summary.csv -> $SUMMARY_BACKUP"
 fi
 scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv" "$SUMMARY_DEST"
+
+# drives.csv: one row per disk, only on machines with more than one internal
+# disk (diagnostics.sh v0.11). A closing session usually has none, since
+# the extra disk is out by then, so a missing remote file keeps the local one.
+DRIVES_TMP=$(mktemp)
+if scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/drives.csv" "$DRIVES_TMP" 2>/dev/null; then
+  if [ -f "$LOCAL_DEST/drives.csv" ]; then
+    cp -p "$LOCAL_DEST/drives.csv" "$LOCAL_DEST/drives.csv.$(date +%Y%m%d-%H%M%S).bak"
+  fi
+  mv "$DRIVES_TMP" "$LOCAL_DEST/drives.csv"
+  echo "Pulled drives.csv (multi-disk machine)."
+else
+  rm -f "$DRIVES_TMP"
+fi
 
 # Warnings only — the pull itself has already succeeded. Status column 11,
 # windows_verified column 13 (same positions diagnostics.sh writes).
