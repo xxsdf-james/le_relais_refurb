@@ -1,0 +1,39 @@
+<!--
+  office-configuration.xml - Office Deployment Tool configuration for the
+  Le Relais class machines, used by install-office.ps1 (same folder).
+
+  Two lines depend on the licence Le Relais IT chooses (not decided yet):
+    Product ID     O365BusinessRetail = Microsoft 365 Apps for business
+                   (Business Standard / Business Premium licences);
+                   O365ProPlusRetail = Apps for enterprise.
+                   Must match the licence or activation fails at sign-in.
+    SharedComputerLicensing  1 = several learners share a PC, each signing in
+                   with their own licensed account (needs Business Premium or
+                   Apps for enterprise). Can be changed later in the registry.
+
+  Word, Excel and PowerPoint only: everything else is excluded to keep
+  background activity down on slow machines. French UI. MonthlyEnterprise =
+  one feature update a month on a fixed day, instead of Current's several.
+  No secrets in this file: it is public with the rest of the repo.
+-->
+<Configuration>
+  <Add OfficeClientEdition="64" Channel="MonthlyEnterprise">
+    <Product ID="O365BusinessRetail">
+      <Language ID="fr-fr" />
+      <ExcludeApp ID="Access" />
+      <ExcludeApp ID="Groove" />
+      <ExcludeApp ID="Lync" />
+      <ExcludeApp ID="OneDrive" />
+      <ExcludeApp ID="OneNote" />
+      <ExcludeApp ID="Outlook" />
+      <ExcludeApp ID="OutlookForWindows" />
+      <ExcludeApp ID="Publisher" />
+      <ExcludeApp ID="Teams" />
+    </Product>
+  </Add>
+  <Property Name="SharedComputerLicensing" Value="1" />
+  <Property Name="FORCEAPPSHUTDOWN" Value="FALSE" />
+  <Updates Enabled="TRUE" />
+  <RemoveMSI />
+  <Display Level="None" AcceptEULA="TRUE" />
+</Configuration>
