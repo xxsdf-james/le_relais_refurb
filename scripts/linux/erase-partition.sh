@@ -763,6 +763,12 @@ log "Confirmed by technician: matched tail of serial $DRIVE_SERIAL."
 #      With --noblank in effect (see v4 changes above), total write_bytes
 #      for a single zero pass should top out at roughly this figure, not
 #      double it.
+#
+#   4. After the "<N> bytes written to /dev/..." line, nwipe reads the whole
+#      drive back (its default verify=last pass) with no further output.
+#      write_bytes stays flat during this phase; watch read_bytes instead.
+#      On 040 (500 GB HDD, 2026-10-19) the write took 1h30 and the
+#      read-back another 1h23 — ~3h total, not a hang.
 # -----------------------------------------------------------------------------
  
 # ============================================================================
