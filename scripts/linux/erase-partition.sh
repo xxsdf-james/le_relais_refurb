@@ -133,6 +133,12 @@
 #     erase_<label>_<CIAD>_<drive serial>.txt, state_..._<drive serial>.env.
 #   - Single-disk machines without a drives.csv: no change in behavior.
 #
+# v16 changes (2026-10-19, after 040/FR1586's HDD was reported failing by
+# SMART only after its nwipe run):
+#   - New §6b: smartctl -H -A on the erased disk after every erase method,
+#     once verification has passed. A failing or unreadable result stops
+#     before the zap; a fail is written to summary.csv's smart_status.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -1052,16 +1058,61 @@ if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" != "pass" ]; then
   log "\n*** VERIFICATION DID NOT PASS ($VERIFY_RESULT) — STOPPING. No partitioning will be attempted. ***"
   log "This machine needs manual investigation before proceeding."
 fi
- 
+
 # ============================================================================
-# 7. Partition-table cleanup (only if erase+verify OK)
+# 6b. SMART health after the erase (v16)
+#
+# The opening diagnostic reads SMART once, before the erase. On 040/FR1586
+# (2026-10-19) the HDD passed it, then after the ~3h nwipe run Ubuntu's disk
+# monitor and the HP BIOS (1720-SMART, attribute #B8) both reported it
+# failing; nothing in this workflow had looked again. Runs after every erase
+# method — it takes about a second.
+#
+# Decided on smartctl's exit status bits (man smartctl, RETURN VALUES), not
+# its text, so ATA and NVMe are handled the same way:
+#   bit 0/1  command line / device open failed     -> unknown, stop
+#   bit 3    overall health "FAILING"              -> fail, stop
+#   bit 4    Pre-fail attribute <= threshold now   -> fail, stop
+#   bit 5    an attribute was <= threshold before  -> warning only
+#   bits 2, 6, 7 (a SMART command failed, error/self-test log entries) are
+#   only logged: common on old drives that are otherwise fine.
+# A stop skips §7's zap, so the checkpoint stays at "verify" and a re-run
+# repeats only this check. erase_result stays "pass" (the data is gone);
+# summary.csv's smart_status is overwritten on a fail so it shows in the
+# deliverable.
+# ============================================================================
+SMART_AFTER="not_run"
+if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ]; then
+  log "\n=== SMART health after the erase ==="
+  run_logged "smartctl_after" sudo smartctl -H -A "$PRIMARY_DEV"
+  SMART_RC=$?
+  if (( SMART_RC & 3 )); then
+    SMART_AFTER="unknown"
+    log "\n*** COULD NOT READ SMART (smartctl exit $SMART_RC) — STOPPING. No partitioning will be attempted. ***"
+    log "Check that smartctl is installed and the disk still shows in lsblk, then re-run this script."
+  elif (( SMART_RC & 24 )); then
+    SMART_AFTER="fail"
+    log "\n*** SMART REPORTS THIS DISK FAILING (smartctl exit $SMART_RC) — STOPPING. No partitioning will be attempted. ***"
+    log "The erase itself passed: the data is gone. Do NOT install Windows on this disk."
+    log "See the attribute table above (WHEN_FAILED = FAILING_NOW) and known-issues.md."
+  else
+    SMART_AFTER="pass"
+    if (( SMART_RC & 32 )); then
+      log "WARNING: an attribute has crossed its threshold in the past (WHEN_FAILED = In_the_past above). Not failing now, but check it before trusting this disk."
+    fi
+    log "SMART health after the erase: OK (smartctl exit $SMART_RC)."
+  fi
+fi
+
+# ============================================================================
+# 7. Partition-table cleanup (only if erase+verify+SMART OK)
 #
 # v8: no longer creates a shared ESP — see v8 changelog above. Just zaps any
 # leftover GPT/MBR structure and leaves the disk fully unallocated for
 # Windows Setup to partition end-to-end itself.
 # ============================================================================
 PARTITION_STATUS="not_attempted"
-if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ]; then
+if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ] && [ "$SMART_AFTER" = "pass" ]; then
   log "\n=== Partition-table cleanup (zap only — Windows Setup partitions the rest) ==="
 
   run_logged "sgdisk_zap" sudo sgdisk --zap-all "$PRIMARY_DEV"
@@ -1137,7 +1188,12 @@ if [ "$CURRENT_HEADER" != "$EXPECTED_HEADER" ]; then
 fi
  
 SAFE_ERASE_METHOD=$(echo "$ERASE_METHOD" | tr ',' ';')
- 
+NEW_SMART=""
+if [ "$SMART_AFTER" = "fail" ]; then
+  NEW_SMART="FAILED after erase"
+  [ "$MULTI_DISK" -eq 1 ] && NEW_SMART="FAILED after erase [$DRIVE_SERIAL]"
+fi
+
 if [ "$ERASE_EXIT" -eq 0 ] && [ "$VERIFY_RESULT" = "pass" ]; then
   NEW_ERASE_RESULT="pass"
   # v8: "partitioned" now means "sanitized + confirmed clean partition table
@@ -1199,6 +1255,7 @@ UPDATED=0
       OLD_STORAGE_CAP=$(echo "$row" | awk -F',' '{print $5}')
       OLD_DRIVE_SERIAL=$(echo "$row" | awk -F',' '{print $6}')
       OLD_SMART=$(echo "$row" | awk -F',' '{print $7}')
+      [ -n "$NEW_SMART" ] && OLD_SMART="\"$NEW_SMART\""
       OLD_OS_INSTALLED=$(echo "$row" | awk -F',' '{print $10}')
       OLD_STATUS=$(echo "$row" | awk -F',' '{print $11}')
       OLD_WINDOWS_VERIFIED=$(echo "$row" | awk -F',' '{print $13}')
@@ -1241,7 +1298,11 @@ echo ""
 echo "Done."
 echo "Full report    : $OUT"
 echo "Summary row in : $SUMMARY_CSV"
-echo "Erase status   : exit=$ERASE_EXIT, verify=$VERIFY_RESULT, partition=$PARTITION_STATUS"
+echo "Erase status   : exit=$ERASE_EXIT, verify=$VERIFY_RESULT, smart=$SMART_AFTER, partition=$PARTITION_STATUS"
+if [ "$SMART_AFTER" = "fail" ]; then
+  echo ""
+  echo "*** SMART reports this disk failing. Do NOT install Windows on it."
+fi
 if [ "$DISKS_LEFT" -gt 0 ]; then
   echo ""
   echo "*** $DISKS_LEFT of this machine's disks NOT erased yet (see drives.csv). Re-run"
