@@ -73,6 +73,17 @@ The cap is 10. You saw 3 passes on machine 1 and 2 on machine 2 (8 updates, then
 
 On startup the script also checks whether the **previous** run ended mid-stage (status still `CHECKING`/`INSTALLING`). If so it logs a warning, because that means the run was killed, crashed or lost power.
 
+**There's a fourth cause, and it's harmless: Windows restarts the machine itself.** After a large first batch, Windows' servicing can need a second restart to finish the updates. It does that on its own schedule, even while the next pass is checking. Seen on 036 (HP EliteOne, HDD, 2026-10-20): pass 0 installed 20 updates and restarted. Pass 1 started at 12:18:58, and at 12:21:30 `TrustedInstaller.exe` restarted the machine (« Système d'exploitation : mise à jour (planifiée) »). The next run logged `WARNING previous run ended abnormally while CHECKING`, then installed the 2 updates left and finished normally. The cost is one pass from the cap.
+
+To tell this apart from a real fault, look at the System log around the time the cut-off pass started. An elevated PowerShell will do; set the times to that window:
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='System'; Id=1074,6005,6006,6008; StartTime='2026-10-20 12:15'; EndTime='2026-10-20 12:30'} | Format-List TimeCreated, Id, Message
+```
+
+- **Harmless:** event 1074 from `C:\WINDOWS\servicing\TrustedInstaller.exe` with a planned-update reason, followed by 6006, which means a clean shutdown. A 1074 from `wmiprvse.exe` is the loop's own restart at the end of a pass.
+- **A real fault:** event 6008 ("unexpected shutdown") means a crash or power loss. If there's neither 1074 nor 6008, the run may have been killed by the 4 h `ExecutionTimeLimit` (see 6). Read the pass's transcript in `transcripts\pass-N.txt`. If it only has its header, the pass was cut off before it printed anything.
+
 ### 5. `LastTaskResult`: useful to a human, not to the script itself (pushback)
 Two problems with the brief as written:
 - **The script can't use it on itself.** While the task is running, `LastTaskResult` reads `0x41301` ("currently running"), so the running script only sees its own run. It's useful to a human or to `check-update-status.ps1` reading it from outside. Inside the script, the equivalent check is the "previous run ended abnormally" test above.
