@@ -11,9 +11,10 @@
 
   Modes (run from an elevated Windows PowerShell unless noted):
 
-    -Setup -Label H1 [-Runs 6]
+    -Setup -Label H1 [-Runs 9]
         Creates local admin "perftest", turns on auto-logon for it, registers
-        the logon task, copies this script to C:\ProgramData\RefurbPerf.
+        the logon task and the scan task (SYSTEM, see "badday" below),
+        copies this script to C:\ProgramData\RefurbPerf.
         Label = the setup under test (H1, H2, REF-9030, ...): letters,
         digits, - and _ only. Restart afterwards.
     (task) -Cycle
@@ -39,7 +40,7 @@
         removes the task, the perftest account and its profile. Results
         stay in C:\ProgramData\RefurbPerf\results.
 
-  Cycles alternate between two kinds, half each:
+  Cycles rotate through three kinds, a third each:
     busy     Word, Excel, Edge launched one after the other as soon as the
              session opens, while Windows is still loading (the start of a
              class).
@@ -47,6 +48,14 @@
              minutes (that wait is itself recorded: settle_s), then Word,
              Excel, Edge cold (first launch since boot), then each again
              warm (second launch, served from memory).
+    badday   like busy, but with a Defender full scan reading the whole
+             disk from sign-in: a stand-in for a class that starts while
+             Windows is catching up on updates or maintenance. Then waits
+             for the scan to end (scan_s, how long such a stretch lasts;
+             UNFINISHED after 120 min). The scan is started by a second
+             task, as SYSTEM, so the measuring task stays a normal user
+             session. It reads but doesn't write like an update install,
+             so it is a lower bound for an update day, not a copy of one.
   A launch is timed from Start-Process until the app has a window with a
   title. That is close to, not exactly, "ready to type": calibrate against
   a stopwatch on a couple of runs. Each cycle waits for the disk to settle
@@ -62,11 +71,12 @@
 param(
     [switch]$Setup,
     [switch]$Cycle,
+    [switch]$Scan,
     [switch]$Monitor,
     [switch]$Report,
     [switch]$Cleanup,
     [string]$Label,
-    [int]$Runs = 6,
+    [int]$Runs = 9,
     [int]$Minutes = 30,
     [string]$Tag = 'routine',
     [switch]$SkipWinsat
@@ -74,6 +84,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $TaskName = 'RefurbPerfTest'
+$ScanTaskName = 'RefurbPerfScan'
 $User     = 'perftest'
 $Dir      = 'C:\ProgramData\RefurbPerf'
 $ResDir   = Join-Path $Dir 'results'
@@ -81,6 +92,8 @@ $RawFile  = Join-Path $ResDir 'raw.csv'
 $StateFile = Join-Path $ResDir 'state.txt'      # WARMUP | RUNNING | DONE
 $CycleFile = Join-Path $ResDir 'cycle.txt'      # next cycle number
 $LastBootFile = Join-Path $ResDir 'last-boot.txt'
+$ScanStartFile = Join-Path $ResDir 'scan-start.txt'   # boot key, written by the scan task
+$ScanEndFile   = Join-Path $ResDir 'scan-end.txt'     # boot key + seconds or FAILED
 $Winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
 
 # The apps a class uses, by the name Start-Process resolves (App Paths) and
@@ -176,6 +189,10 @@ function Measure-Launch($app, [int]$timeoutSec = 180) {
     return 'TIMEOUT'
 }
 
+function Get-CycleKind([int]$n) {
+    switch ($n % 3) { 1 { return 'busy' } 2 { return 'settled' } default { return 'badday' } }
+}
+
 function Restart-Now([string]$why) {
     Write-Host "Restarting in 10 s ($why). Close this window to stop."
     & shutdown.exe /r /t 10 /c "perf-test: $why" | Out-Null
@@ -193,9 +210,11 @@ function Get-Median([double[]]$v) {
 if ($Setup) {
     if (-not (Test-Elevated)) { Fail 'not elevated - reopen PowerShell as Administrator' }
     if ($Label -notmatch '^[A-Za-z0-9_-]{1,20}$') { Fail '-Label must be 1-20 letters, digits, - or _ (e.g. H1)' }
-    if ($Runs -lt 2) { Fail '-Runs must be at least 2 (one busy + one settled cycle)' }
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Fail "task $TaskName already exists - run -Cleanup first"
+    if ($Runs -lt 3) { Fail '-Runs must be at least 3 (one busy, one settled, one badday cycle)' }
+    foreach ($tn in $TaskName, $ScanTaskName) {
+        if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) {
+            Fail "task $tn already exists - run -Cleanup first"
+        }
     }
 
     # Script folder: only SYSTEM and Administrators may write, because the
@@ -211,7 +230,7 @@ if ($Setup) {
     # Removed first: the ones perftest or SYSTEM created are owned by them, so
     # the /reset below can't change their ACL (denied), but deleting only
     # needs rights on the folder.
-    Remove-Item $RawFile, $LastBootFile -ErrorAction SilentlyContinue
+    Remove-Item $RawFile, $LastBootFile, $ScanStartFile, $ScanEndFile -ErrorAction SilentlyContinue
     Get-ChildItem $ResDir -Filter 'monitor-*.csv' | Remove-Item
     & icacls.exe $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "icacls failed on $Dir" }
@@ -253,6 +272,14 @@ if ($Setup) {
         -MultipleInstances IgnoreNew -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
     Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
         -Principal $principal -Settings $settings | Out-Null
+    # Same trigger, as SYSTEM: starting a Defender scan from the non-elevated
+    # measuring task isn't something to rely on. It does nothing except on
+    # badday cycles.
+    $scanAction = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
+        "-NoProfile -ExecutionPolicy Bypass -File `"$Dir\perf-test.ps1`" -Scan")
+    $scanPrincipal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
+    Register-ScheduledTask -TaskName $ScanTaskName -Action $scanAction -Trigger $trigger `
+        -Principal $scanPrincipal -Settings $settings | Out-Null
 
     Set-Content (Join-Path $ResDir 'label.txt') $Label -Encoding ASCII
     Set-Content (Join-Path $ResDir 'runs.txt') $Runs -Encoding ASCII
@@ -261,9 +288,11 @@ if ($Setup) {
     Set-Content $CycleFile '1' -Encoding ASCII
 
     $t = Get-ScheduledTask -TaskName $TaskName
+    $st = Get-ScheduledTask -TaskName $ScanTaskName
     Write-Host ''
     Write-Host "Label       : $Label, $Runs cycles"
     Write-Host "Task        : $($t.TaskName) [$($t.State)], runs as $($t.Principal.UserId) $($t.Principal.RunLevel)"
+    Write-Host "Scan task   : $($st.TaskName) [$($st.State)], runs as $($st.Principal.UserId) $($st.Principal.RunLevel)"
     Write-Host "Auto-logon  : $((Get-ItemProperty $Winlogon).DefaultUserName)"
     Write-Host ''
     Write-Host 'Pause Windows Update for a week if not done, then restart. perftest signs in'
@@ -318,18 +347,41 @@ public static extern uint SetThreadExecutionState(uint esFlags);
     Set-Content $LastBootFile $bootKey -Encoding ASCII
 
     $n = [int](Read-One $CycleFile)
-    $kind = if ($n % 2) { 'busy' } else { 'settled' }
+    $kind = Get-CycleKind $n
     Write-Host "Cycle $n of $runsTotal ($kind). Don't use the machine until it restarts."
 
     Add-Row $n $kind 'boot_time' $bootKey
     Add-Row $n $kind 'logon_task_s' (Format-Sec ($taskStart - $boot).TotalSeconds)
 
-    if ($kind -eq 'busy') {
+    if ($kind -eq 'badday') {
+        # Launch only once the scan task has started the scan for this boot,
+        # else the launches could run before there is anything to compete with.
+        Write-Host 'Waiting for the Defender scan to start...'
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        while ((Read-One $ScanStartFile) -ne $bootKey -and $sw.Elapsed.TotalSeconds -lt 120) { Start-Sleep -Seconds 1 }
+        if ((Read-One $ScanStartFile) -ne $bootKey) {
+            throw "the scan task didn't start a scan within 120 s (check task $ScanTaskName in Task Scheduler)"
+        }
+        Add-Row $n $kind 'scan_wait_s' (Format-Sec $sw.Elapsed.TotalSeconds)
+        Start-Sleep -Seconds 10      # let the scan get going
+    }
+
+    if ($kind -eq 'busy' -or $kind -eq 'badday') {
         foreach ($a in $Apps) {
             $r = Measure-Launch $a
-            Write-Host "  $($a.Name) (busy): $r"
-            Add-Row $n $kind "$($a.Name)_busy_s" $r
+            Write-Host "  $($a.Name) ($kind): $r"
+            Add-Row $n $kind "$($a.Name)_${kind}_s" $r
             Start-Sleep -Seconds 3
+        }
+        if ($kind -eq 'badday') {
+            Write-Host 'Waiting for the scan to end (up to 120 min)...'
+            $end = ''
+            while ($sw.Elapsed.TotalMinutes -lt 120) {
+                $end = Read-One $ScanEndFile
+                if ($end -like "$bootKey *") { break }
+                Start-Sleep -Seconds 10
+            }
+            Add-Row $n $kind 'scan_s' $(if ($end -like "$bootKey *") { $end.Substring($bootKey.Length + 1) } else { 'UNFINISHED' })
         }
         Write-Host 'Waiting for the disk to settle before restarting...'
         [void](Wait-DiskSettled)
@@ -364,6 +416,22 @@ public static extern uint SetThreadExecutionState(uint esFlags);
     Read-Host 'Press Enter to close'
     exit 1
   }
+}
+
+# ------------------------------------------------------------------ -Scan
+# Run by the scan task, as SYSTEM, at the same logon as -Cycle. Reads the
+# same state files, so it acts on the cycle -Cycle is about to measure.
+if ($Scan) {
+    if ((Read-One $StateFile) -ne 'RUNNING') { exit 0 }
+    if ((Get-CycleKind ([int](Read-One $CycleFile))) -ne 'badday') { exit 0 }
+    $bootKey = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('o')
+    if ((Read-One $ScanStartFile) -eq $bootKey) { exit 0 }      # sign-out and back in
+    Set-Content $ScanStartFile $bootKey -Encoding ASCII
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    # Returns when the scan ends. A restart before then just kills it.
+    try { Start-MpScan -ScanType FullScan; $r = Format-Sec $sw.Elapsed.TotalSeconds } catch { $r = 'FAILED' }
+    Set-Content $ScanEndFile "$bootKey $r" -Encoding ASCII
+    exit 0
 }
 
 # --------------------------------------------------------------- -Monitor
@@ -509,9 +577,11 @@ if ($Cleanup) {
         Remove-ItemProperty $Winlogon DefaultUserName -ErrorAction SilentlyContinue
         Write-Host 'auto-logon off'
     }
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-        Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-        Write-Host "task $TaskName removed"
+    foreach ($tn in $TaskName, $ScanTaskName) {
+        if (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue) {
+            Unregister-ScheduledTask -TaskName $tn -Confirm:$false
+            Write-Host "task $tn removed"
+        }
     }
     $acct = Get-LocalUser -Name $User -ErrorAction SilentlyContinue
     if ($acct) {
