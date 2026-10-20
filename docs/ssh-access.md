@@ -73,11 +73,28 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_r
 Get-FileHash enable-ssh.ps1 -Algorithm SHA256    # compare with the value in the Obsidian note
 powershell -ExecutionPolicy Bypass -File .\enable-ssh.ps1 <your-github-username>
 ```
+It prints `OK:` per step and stops at the first `FAILED:`. At the end it prints the
+host key fingerprint and the connect command. It opens the firewall rule for every
+network profile but only from the local subnet: without that, a Public network (the
+usual case) times out (`known-issues.md`, "Remote access (SSH)").
+
+From the laptop, first connection to this install:
+```
+ssh-keygen -R <target-ip>     # only if known_hosts has an old key for this address
+ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -i ~/.ssh/id_ed25519_refurb Admin@<target-ip>
+```
+Check that the `Server host key: ssh-ed25519 SHA256:...` it shows (add `-v`) matches
+the fingerprint the script printed. `IdentitiesOnly=yes` stops ssh-agent offering
+your other keys to the target if the refurb key is refused. Use it on every
+`ssh`/`scp` to a target, Linux or Windows.
 
 **Mandatory, before this machine goes to its recipient:**
 ```
 powershell -ExecutionPolicy Bypass -File .\disable-ssh.ps1
 ```
+It removes the capability, the firewall rule and all of `C:\ProgramData\ssh` (host
+keys, logs), then checks each is gone. Only `Clean:` with exit 0 counts as done; any
+`FAIL:` line has to be fixed before handoff.
 Unlike the Linux live session, this OpenSSH Server runs on the actual
 persistent install — skipping cleanup leaves a remotely-reachable SSH
 server trusting a technician's personal key for admin access on someone's

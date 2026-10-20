@@ -110,7 +110,9 @@ this — it's kept for when that phase resumes.
    tooling (walkthrough step 5) — do it now so the pre-handoff checklist doesn't need
    another Windows boot after closing diagnostics.
 10. ~~Fetch and run enable-ssh.ps1~~ — **currently skipped, batch-wide**: Windows-side SSH
-    has open bugs, not yet root-caused/documented. Until that's fixed, Windows results
+    timed out because of a Private-only firewall rule (root-caused 2026-10-20,
+    `known-issues.md`, "Remote access (SSH)"). The fixed scripts passed on the test VM, and
+    bringing this step back is Hamish's call (with IT's agreement). Until then, Windows results
     (update-loop completion, activation) are verified manually at the console (steps
     8–9) rather than pulled over SSH; the only diagnostic file that leaves the machine
     over SSH is `diag_after`, from the Ubuntu Live closing-diagnostics boot (steps
@@ -400,8 +402,9 @@ Before a machine leaves for its recipient:
   reinstalled regardless), this OpenSSH server persists on the actual install —
   skipping it leaves a remotely-reachable SSH server trusting a technician's personal
   key for admin access on someone's low-budget PC. See `docs/ssh-access.md`. Currently
-  a no-op for this batch — step 10 above has `enable-ssh.ps1` skipped batch-wide (open
-  bugs), so there's nothing to disable unless it was run ad hoc for troubleshooting.
+  a no-op for this batch — step 10 above has `enable-ssh.ps1` skipped batch-wide, so
+  there's nothing to disable unless it was run ad hoc for troubleshooting. If it was,
+  done means `disable-ssh.ps1` printed `Clean:` (exit 0), not just that it ran.
 - [ ] ~~Set a real password on the local admin account~~ — **not applicable, per Le
   Relais IT (confirmed 2026-09-29):** this batch is delivered with the Rufus-bypass
   blank-password local admin account left as-is, intentionally. This was flagged
