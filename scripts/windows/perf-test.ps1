@@ -203,9 +203,20 @@ if ($Setup) {
     # runs as perftest with a non-elevated token, which doesn't count as
     # admin (without this read grant powershell can't open the script and the
     # task ends at once with 0xFFFD0000). Results folder: perftest may write too.
+    # Set on the folder only, then reset what's inside to inherit it: /T with
+    # these folder-only (OI)(CI) grants leaves files from an earlier run with
+    # an empty ACL, writable by no one (seen on the test VM, 2026-10-20).
     New-Item -ItemType Directory -Path $Dir, $ResDir -Force | Out-Null
-    & icacls.exe $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /T /Q | Out-Null
+    # Leftovers from an earlier label on this machine would mix into -Report.
+    # Removed first: the ones perftest or SYSTEM created are owned by them, so
+    # the /reset below can't change their ACL (denied), but deleting only
+    # needs rights on the folder.
+    Remove-Item $RawFile, $LastBootFile -ErrorAction SilentlyContinue
+    Get-ChildItem $ResDir -Filter 'monitor-*.csv' | Remove-Item
+    & icacls.exe $Dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "icacls failed on $Dir" }
+    & icacls.exe "$Dir\*" /reset /T /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Fail "icacls /reset failed in $Dir" }
     Copy-Item $PSCommandPath (Join-Path $Dir 'perf-test.ps1') -Force
 
     # Random password: auto-logon needs one stored, and it only has to work
@@ -223,7 +234,7 @@ if ($Setup) {
     if (-not (Get-LocalGroupMember -SID 'S-1-5-32-544' | Where-Object { $_.Name -like "*\$User" })) {
         Add-LocalGroupMember -SID 'S-1-5-32-544' -Member $User
     }
-    & icacls.exe $ResDir /grant "${env:COMPUTERNAME}\${User}:(OI)(CI)M" /T /Q | Out-Null
+    & icacls.exe $ResDir /grant "${env:COMPUTERNAME}\${User}:(OI)(CI)M" /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { Fail "icacls failed on $ResDir" }
 
     Set-ItemProperty $Winlogon AutoAdminLogon '1'
@@ -248,9 +259,6 @@ if ($Setup) {
     Set-Content (Join-Path $ResDir 'setup-time.txt') (Get-Date -Format o) -Encoding ASCII
     Set-Content $StateFile 'WARMUP' -Encoding ASCII
     Set-Content $CycleFile '1' -Encoding ASCII
-    # Leftovers from an earlier label on this machine would mix into -Report.
-    Remove-Item $RawFile, $LastBootFile -ErrorAction SilentlyContinue
-    Get-ChildItem $ResDir -Filter 'monitor-*.csv' | Remove-Item
 
     $t = Get-ScheduledTask -TaskName $TaskName
     Write-Host ''
