@@ -13,8 +13,8 @@
   it is checked by its Authenticode signature instead: it must be valid and
   issued to Microsoft Corporation, or nothing runs. Office itself then
   downloads from Microsoft's Office CDN (officecdn.microsoft.com), about
-  2-3 GB per machine. Whether the Le Relais network intercepts that CDN is
-  untested: try one machine there first.
+  2-3 GB per machine. Both pass through on the Le Relais network
+  (2026-10-20: a Lenovo, and the HP 036 in 11 min).
 
   No licence is needed to install. Word and Excel open unlicensed and ask
   for a sign-in; the licence decides activation, not installation (see the
@@ -90,11 +90,13 @@ Write-Log "setup.exe $ver, signature Valid, signer: $subject"
 # exit 2250 after a 60 s timeout, 0x80072ee2, reaching
 # mrodevicemgr.officeapps.live.com; the retry minutes later went through).
 # Re-running /configure is safe: it carries on from whatever is in place.
+# -NoNewWindow: setup.exe is a console program, so without it Windows opens
+# an empty console titled with its path for the whole install.
 $exit = $null
 for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     Write-Log "install START, attempt $attempt of $Attempts (downloads Office from the Office CDN, can take 10-30 min)"
     $p = Start-Process -FilePath $setup -ArgumentList '/configure', "`"$Work\configuration.xml`"" `
-            -WorkingDirectory $Work -Wait -PassThru
+            -WorkingDirectory $Work -NoNewWindow -Wait -PassThru
     $exit = $p.ExitCode
     Write-Log "install END, attempt $attempt, setup.exe exit code $exit"
     if ($exit -eq 0) { break }
