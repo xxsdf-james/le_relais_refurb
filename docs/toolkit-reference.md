@@ -185,6 +185,16 @@ It asks for the session code, then checks, in order, and stops at the first prob
 Then it runs opening diagnostics (no prompts: the identity comes from `identity.env`),
 the erase in a `screen` session, and the pull.
 
+- **Suspend before every erase (laptop scripts after v17):** before starting
+  erase-partition.sh, the laptop suspends the target to RAM with `rtcwake` and waits
+  for it to wake by itself after ~30 s. This clears the SATA FROZEN state
+  (methodology.md §4.3) without a trip to the target's power menu. It checks that the
+  kernel's suspend counter went up, so a suspend that didn't happen isn't counted. If
+  the target hasn't woken after a minute, press its power button. If SSH doesn't come
+  back within a few minutes, the script stops; re-run it. It warns if the target can't
+  do S3 (`[deep]` not selected in `/sys/power/mem_sleep`). In that case the drive may
+  still be frozen, and erase-partition.sh will stop as before.
+
 - **The erase is unchanged:** you pick the disk, it checks the drive serial against
   the diagnostics record, and you type the drive serial to confirm. Since
   erase-partition.sh v17 it also refuses if the CIAD or machine number doesn't match

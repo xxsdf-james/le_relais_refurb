@@ -15,7 +15,8 @@
 #   5. diagnostics.sh + erase-partition.sh fetched at <tag>, checked against
 #      this repo's copy of the tag.
 #   6. Opening diagnostics.
-#   7. erase-partition.sh in a screen session on the target: survives a
+#   7. Suspend to RAM and back (rtcwake), then erase-partition.sh in a
+#      screen session on the target: survives a
 #      dropped connection or a sleeping laptop; re-running this script
 #      re-attaches. The erase's own checks and prompts are unchanged — you
 #      pick the disk and type the drive serial.
@@ -126,11 +127,42 @@ echo "=== 7. Erase ==="
 screen_running() {
   rsh 'screen -ls erase' 2>/dev/null | grep -qE '[0-9]+\.erase[[:space:]]'
 }
+# Suspend to RAM and back before every erase. A resume resets the SATA link
+# without a POST, so the BIOS doesn't reissue its freeze lock (SATA SSD
+# FROZEN, methodology.md §4.3; it also cleared the NVMe 0x2001 rejection on
+# 032). rtcwake sets an RTC alarm so the target wakes by itself; the kernel's
+# suspend counter going up is the proof a suspend really happened.
+suspend_resume() {
+  local mode before after
+  mode=$(rsh 'cat /sys/power/mem_sleep' 2>/dev/null || true)
+  echo "Sleep modes on the target: ${mode:-<unknown>}"
+  if [[ "$mode" != *"[deep]"* ]]; then
+    echo "WARNING: [deep] (S3) isn't selected, so the drive may not be reset. erase-partition.sh will stop if it's still frozen."
+  fi
+  before=$(rsh 'cat /sys/power/suspend_stats/success' 2>/dev/null || true)
+  [[ "$before" =~ ^[0-9]+$ ]] || die "Couldn't read the target's suspend count. Nothing was erased."
+  # Started 2 s later by systemd, so this ssh call returns before the network goes down.
+  rsh 'sudo systemd-run --quiet --on-active=2 rtcwake -m mem -s 30' \
+    || die "Couldn't start the suspend on the target. Nothing was erased."
+  echo "Target suspending for about 30 s. If it hasn't woken after a minute, press its power button."
+  sleep 10
+  for _ in $(seq 1 30); do
+    after=$(ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 -n "$REMOTE_USER@$TARGET_IP" \
+      'cat /sys/power/suspend_stats/success' 2>/dev/null || true)
+    if [[ "$after" =~ ^[0-9]+$ ]] && [ "$after" -gt "$before" ]; then
+      echo "Target suspended and resumed (suspend count $before -> $after)."
+      return 0
+    fi
+    sleep 5
+  done
+  die "The target didn't come back from suspend over SSH. Wake it with the power button, check its network, and re-run this script. Nothing was erased."
+}
 while :; do
   if screen_running; then
     echo "An erase is already running on the target — re-attaching."
-  elif ! ask_yes "Start erase-partition.sh on the target now? [Y/n]" y; then
-    break
+  else
+    ask_yes "Start erase-partition.sh on the target now? [Y/n]" y || break
+    suspend_resume
   fi
   echo "To watch or type at the target's console instead, run there:  screen -x erase"
   echo "To leave it running and come back later: Ctrl-A then D, and re-run this script."
