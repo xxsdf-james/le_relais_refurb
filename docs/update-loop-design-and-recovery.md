@@ -110,7 +110,8 @@ The status file is what the script *said* it was doing. `LastTaskResult` and tas
 |---|---|---|
 | CHECKING / INSTALLING | task Running | In progress (flagged SUSPECT HUNG after 4 h) |
 | CHECKING / INSTALLING | task **not** running | Died mid-run (time-limit kill, crash, power loss) |
-| REBOOTING | last boot is *before* the status time | Reboot never happened |
+| REBOOTING | last boot is *before* the status time, < 30 min ago | In progress: Windows is shutting down and installing updates (3 min on the test VM for a cumulative update, 2026-10-21); don't power off |
+| REBOOTING | last boot is *before* the status time, ≥ 30 min ago | Reboot never happened |
 | REBOOTING | booted >10 min ago, task not running | Task didn't fire after boot |
 | ERROR / ABORTED | – | Needs a human (see below) |
 

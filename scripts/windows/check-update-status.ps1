@@ -13,6 +13,10 @@ $ErrorActionPreference = 'Continue'
 $TaskName   = 'RefurbWindowsUpdate'
 $Dir        = 'C:\ProgramData\Refurb'
 $StaleHours = 4    # keep in line with the task's ExecutionTimeLimit
+# Minutes between "rebooting" and a new boot before calling the reboot failed.
+# Windows installs updates while shutting down: 3 min on the test VM for a
+# cumulative update (2026-10-21), longer on a hard disk.
+$RebootGraceMin = 30
  
 # Keyed by unsigned hex string: LastTaskResult is a UInt32 and task
 # Scheduler codes like 0x8004131F don't fit a signed [int].
@@ -79,7 +83,11 @@ $v =
         } else { "DIED MID-RUN - status says $state but task is not running (killed by time limit, crash, or power loss). Reboot to retry." }
     }
     elseif ($state -eq 'REBOOTING') {
-        if ($since -and $boot -lt $since) { 'REBOOT DID NOT HAPPEN - status says rebooting but no boot since then. Reboot manually.' }
+        if ($since -and $boot -lt $since) {
+            $m = [math]::Round(($now - $since).TotalMinutes)
+            if ($m -lt $RebootGraceMin) { "IN PROGRESS - restarting for $m min (Windows installs updates while shutting down: do not power off)" }
+            else { "REBOOT DID NOT HAPPEN - status says rebooting for $m min, no boot since. Restart from the Start menu (not the power button)." }
+        }
         elseif ($task.State -eq 'Running') { 'IN PROGRESS - rebooted, next pass starting' }
         elseif (($now - $boot).TotalMinutes -gt 10) { 'TASK DID NOT FIRE AFTER REBOOT - check task is Enabled (Get-ScheduledTask)' }
         else { 'IN PROGRESS - rebooted recently, task starts ~1 min after boot' }
