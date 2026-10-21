@@ -10,7 +10,7 @@
 #   3. That identity checked against what open-machine.sh recorded at the
 #      opening pass: chassis serial, machine number and asset tag must all
 #      agree. Each disagreement is reported on its own line.
-#   4. diagnostics.sh fetched at <tag>, checked against this repo's copy.
+#   4. diagnostics.sh fetched at <repo-tag>, checked against this repo's copy.
 #   5. push-summary.sh (its own serial / one-row / no-overwrite checks).
 #   6. Closing diagnostics.
 #   7. pull-results.sh — its GREEN / not-GREEN verdict is the final word.
@@ -22,10 +22,10 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: close-machine.sh <target-ip|user@target-ip> <tag>
+Usage: close-machine.sh <target-ip|user@target-ip> <repo-tag>
 
   target-ip  the IP on the identity card enable-ssh.sh printed on the target
-  tag        the repo tag to fetch diagnostics.sh from (e.g. v16)
+  repo-tag   the repo tag (not the asset tag) to fetch diagnostics.sh from (e.g. v17)
 
 Run enable-ssh.sh at the target's keyboard first. You'll be asked for the
 session code on its screen.

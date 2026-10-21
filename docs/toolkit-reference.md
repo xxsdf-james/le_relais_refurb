@@ -168,7 +168,7 @@ sudo bash enable-ssh.sh xxsdf-james
 It asks for the machine number and the asset tag, each twice. Then it prints the
 identity card: number, asset tag, chassis serial, IP, **session code**. On the laptop:
 ```
-scripts/laptop/open-machine.sh <ip> <tag>
+scripts/laptop/open-machine.sh <ip> <repo-tag>    # e.g. v17 — the git tag, not the asset tag
 ```
 It asks for the session code, then checks, in order, and stops at the first problem:
 1. The code matches the key of the machine at that IP.
@@ -178,7 +178,7 @@ It asks for the session code, then checks, in order, and stops at the first prob
    and number.
 4. The target's own `results/`: nothing from another machine, and not a machine at
    closing stage (GREEN / windows_verified).
-5. `diagnostics.sh` and `erase-partition.sh` are fetched at `<tag>` and checked against
+5. `diagnostics.sh` and `erase-partition.sh` are fetched at `<repo-tag>` and checked against
    SHA-256 values computed from this repo's copy of the tag (no Obsidian values needed
    for these two).
 
@@ -211,7 +211,7 @@ the erase in a `screen` session, and the pull.
 **Closing (steps 11–12).** New live boot. At the target, the same three
 `enable-ssh.sh` lines as above (a new boot means a new session code). On the laptop:
 ```
-scripts/laptop/close-machine.sh <ip> <tag>
+scripts/laptop/close-machine.sh <ip> <repo-tag>   # same git tag
 ```
 It checks the session code and the serial as above. Then it compares the identity typed
 at the target with what was recorded at the opening pass

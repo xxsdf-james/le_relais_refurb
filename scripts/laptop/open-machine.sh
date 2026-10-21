@@ -12,7 +12,7 @@
 #      serial under two machines).
 #   4. Target's own results/ checked: nothing from another machine, not a
 #      machine at closing stage.
-#   5. diagnostics.sh + erase-partition.sh fetched at <tag>, checked against
+#   5. diagnostics.sh + erase-partition.sh fetched at <repo-tag>, checked against
 #      this repo's copy of the tag.
 #   6. Opening diagnostics.
 #   7. Suspend to RAM and back (rtcwake), then erase-partition.sh in a
@@ -29,11 +29,12 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: open-machine.sh <target-ip|user@target-ip> <tag>
+Usage: open-machine.sh <target-ip|user@target-ip> <repo-tag>
 
   target-ip  the IP on the identity card enable-ssh.sh printed on the target
-  tag        the repo tag to fetch diagnostics.sh / erase-partition.sh from
-             (e.g. v16) — must exist in this repo; hashes are computed from it
+  repo-tag   the repo tag (not the asset tag) to fetch diagnostics.sh /
+             erase-partition.sh from (e.g. v17) — must exist in this repo;
+             hashes are computed from it
 
 Run enable-ssh.sh at the target's keyboard first. You'll be asked for the
 session code on its screen.
