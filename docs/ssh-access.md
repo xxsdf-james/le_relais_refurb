@@ -139,11 +139,11 @@ the Live filesystem doesn't persist it. So a *different* live boot of the
 closing-diagnostics boot later in `toolkit-reference.md`'s per-machine
 workflow — always presents a different host key at the same IP. DHCP
 handing that IP to a *different* bench machine between sessions triggers
-the identical warning. There's no host-key pinning in this design to
-check the new key against (the GitHub-published-key model above
-authenticates you to the target, not the target's identity to you) — the
-real trust boundary is physical: you're at the bench, you just watched
-`enable-ssh.sh` print that connect command.
+the identical warning. Before v16 there was no host-key pinning in this
+design to check the new key against (the GitHub-published-key model above
+authenticates you to the target, not the target's identity to you), so
+the trust boundary was only physical. Since v16 it's checked: see
+"Session code" below.
 
 Fix — remove the stale entry, then add the new key non-interactively:
 ```
@@ -157,10 +157,29 @@ answered when `scp` ran nested inside a script — it failed closed
 fully isolated, but `ssh-keyscan` sidesteps it entirely by adding the key
 non-interactively, which is the same trust-on-first-use acceptance a
 manual "yes" would have done anyway (see above — there's nothing to
-verify the new key against either way). `scripts/laptop/pull-results.sh`
-now does this automatically before each pull; do the same by hand before
-a plain interactive `ssh`/`scp` session if you hit this.
+verify the new key against either way). Do the same by hand before a
+plain interactive `ssh`/`scp` session if you hit this. The laptop scripts
+no longer do it (see below).
 
 Don't disable `StrictHostKeyChecking` globally to work around this; it's
 still meaningful for anything outside this specific ephemeral-live-session
 case (e.g. non-LAN-local connections).
+
+## Session code: checking the target's identity (v16+)
+
+`enable-ssh.sh` v16 prints a **session code** on the target's screen: the first 6 hex
+characters of the SHA-256 of that boot's ed25519 host key (the same hash `ssh-keygen -l`
+shows in base64). The laptop scripts (`scripts/laptop/lib-target.sh`) scan the key
+actually answering at the IP, compute the same code, and ask you to type the one on the
+screen. A match means the IP is the machine you're reading. 6 hex characters leave about
+a 1 in 16.7 million chance of a different machine matching by accident.
+
+The verified key is then pinned in `le_relais_refurb_results/.known_hosts/<ip>`, and
+every `ssh`/`scp` the scripts make uses that file with `StrictHostKeyChecking=yes`. A new
+boot, or a different machine taking that IP, presents a different key. The scripts then
+ask for the code again instead of trusting it. `~/.ssh/known_hosts` isn't touched.
+
+Before v16, `pull-results.sh`/`push-summary.sh` re-scanned and trusted whatever key
+answered (trust on first use). For a target running an older `enable-ssh.sh`, which shows
+no code, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there and type the last
+6 characters of the `SHA256:` value instead.

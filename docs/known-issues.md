@@ -20,6 +20,11 @@ Each entry: **Symptom → Cause → Fix**, plus how broadly it's expected to app
 
 ## Diagnostics / erase workflow
 
+### erase-partition.sh v17 refuses: CIAD or machine number doesn't match the opening diagnostics
+- **Symptom**: ABORTED with "recorded under CIAD X, but this run is for CIAD Y", or "No opening diagnostics log for machine NNN / CIAD X". Nothing was erased.
+- **Why it's fatal now**: with the erase startable from the laptop (`open-machine.sh`), these checks are what stop it on a machine other than the one meant. Before v17 a CIAD mismatch was only a warning and the run went on, rewriting the row's CIAD.
+- **Fix**: the identity comes from `results/identity.env`, typed at the target in `enable-ssh.sh`. If it was mistyped, re-run `enable-ssh.sh` at the target (it rewrites the file; diagnostics must then be re-run, since its log name carries the number and CIAD). If the CIAD genuinely changed since the opening diagnostics, correct `summary.csv` by hand first. The script won't guess which value is right.
+
 ### erase-partition.sh's pre-sanitize cross-check compared a drive serial against a machine serial — always a coincidental match at best
 - **Symptom**: erase-partition.sh aborts at the "Cross-check against opening diagnostic" step with "no matching 'before' row", even though a before-diagnostic was clearly run and recorded for that machine (e.g. 001/CIAD7562).
 - **Cause**: diagnostics.sh (v0.3, v0.4) records the **machine's chassis serial** (`dmidecode -t system`) in the `serial_number` column. erase-partition.sh's cross-check reads the **drive's own serial** (`nvme id-ctrl` / `smartctl -i`) and searched for it in that same `serial_number` column. These are two different numbers — the chassis serial identifies the machine, the drive serial identifies the physical disk, and a drive can in principle be swapped between chassis without the chassis serial changing. The match could only ever succeed if the two happened to be identical, which is not something to rely on.

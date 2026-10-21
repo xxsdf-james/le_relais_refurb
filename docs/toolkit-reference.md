@@ -63,15 +63,22 @@ Covers the current 36-machine Windows-only priority (CLAUDE.md): activated, full
 updated, no open-source apps. The dual-boot/Mint workflow further below is not part of
 this — it's kept for when that phase resumes.
 
+Since v16 (2026-10-21), steps 2–4 and 11–12 are driven from the laptop:
+`enable-ssh.sh` is the only thing typed at the target, then `open-machine.sh` /
+`close-machine.sh` do the rest over SSH, with identity checks at every step. See
+"Laptop-driven passes (v16+)" below. The step descriptions here still say what each
+stage does. Machines opened before v16 are closed with the manual commands
+("Diagnostics + SSH stage — manual walkthrough").
+
 ```
 1. Boot Ubuntu USB → Ubuntu Live
 2. Fetch diagnostics.sh, verify its SHA-256, run it (`bash diagnostics.sh` — no sudo,
-   it escalates per-command internally) → opening diagnostics: machine label + "before".
-   Exact commands: "Diagnostics + SSH stage — full walkthrough" below.
+   it escalates per-command internally) → opening diagnostics: machine number + "before".
+   v16+: done by open-machine.sh. Manual: "Diagnostics + SSH stage — manual walkthrough".
 3. Fetch and run enable-ssh.sh (`sudo bash enable-ssh.sh <github-username>`) — see
    docs/ssh-access.md. Always done, not just for ad hoc bench access: results are pulled
-   and `summary.csv` updated over SSH on every machine in this batch. Exact commands:
-   walkthrough below.
+   and `summary.csv` updated over SSH on every machine in this batch. v16+: run it
+   FIRST, at the target's keyboard; it also records the machine number and asset tag.
 4. Fetch erase-partition.sh into the SAME directory as diagnostics.sh (both resolve
    results/ relative to themselves), verify its SHA-256, run it (`bash
    erase-partition.sh` — no sudo): sanitizes the drive (method by drive type,
@@ -125,17 +132,103 @@ this — it's kept for when that phase resumes.
     `scripts/laptop/push-summary.sh`; THEN fetch and run diagnostics.sh for closing
     diagnostics (same machine label + "after"). The push has to come first: without
     the opening row in results/, diagnostics.sh inserts a fresh "before" row instead
-    of updating the existing one, and the machine never reaches GREEN. Exact
-    commands: walkthrough below.
+    of updating the existing one, and the machine never reaches GREEN. v16+:
+    enable-ssh.sh at the target, then close-machine.sh does the rest in that order.
 12. Pull that machine's result files (diag_after, summary.csv) over SSH, from the
     laptop via `scripts/laptop/pull-results.sh` — see docs/ssh-access.md — not a
     physical USB. Exact commands: walkthrough below.
 13. Work through the pre-handoff checklist below before the machine leaves
 ```
 
-### Diagnostics + SSH stage — full walkthrough (steps 2–4, 11–12)
+### Laptop-driven passes (v16+) — steps 2–4 and 11–12
 
-Concrete commands for the Ubuntu-Live diagnostics and SSH-results-pull portions of the
+Only `enable-ssh.sh` is typed at the target. Everything else runs from the laptop, which
+checks at every step that it's talking to the machine you mean.
+
+**The identities and where each one comes from:**
+
+| Identity | Source | Typed where |
+|---|---|---|
+| Machine number (3 digits) | the bench label on the box | at the target, twice |
+| Asset tag (CIAD, FR, N…, or plain digits) | the Le Relais sticker; it's also the laptop folder name | at the target, twice |
+| Chassis serial | `dmidecode`, read by the scripts | never typed |
+| Session code (6 characters) | SHA-256 of this boot's SSH host key, shown on the target's screen | at the laptop |
+
+The laptop never asks for a machine number or asset tag: they're typed at the
+machine's own keyboard, reading the stickers on that box. The session code then proves
+the IP the laptop connects to is that same machine, and every later SSH/SCP call in
+the session refuses any other host key.
+
+**Opening (steps 2–4).** At the target, in the home directory:
+```
+wget -O enable-ssh.sh https://raw.githubusercontent.com/xxsdf-james/le_relais_refurb/refs/tags/<tag>/scripts/linux/enable-ssh.sh
+sha256sum enable-ssh.sh       # compare with the value in the Obsidian note
+sudo bash enable-ssh.sh xxsdf-james
+```
+It asks for the machine number and the asset tag, each twice. Then it prints the
+identity card: number, asset tag, chassis serial, IP, **session code**. On the laptop:
+```
+scripts/laptop/open-machine.sh <ip> <tag>
+```
+It asks for the session code, then checks, in order, and stops at the first problem:
+1. The code matches the key of the machine at that IP.
+2. The target's `identity.env` serial matches what `dmidecode` reads now.
+3. Laptop records: the number, asset tag and serial aren't already used by another
+   machine's folder. If this asset tag's folder exists (a re-run), it's for this serial
+   and number.
+4. The target's own `results/`: nothing from another machine, and not a machine at
+   closing stage (GREEN / windows_verified).
+5. `diagnostics.sh` and `erase-partition.sh` are fetched at `<tag>` and checked against
+   SHA-256 values computed from this repo's copy of the tag (no Obsidian values needed
+   for these two).
+
+Then it runs opening diagnostics (no prompts: the identity comes from `identity.env`),
+the erase in a `screen` session, and the pull.
+
+- **The erase is unchanged:** you pick the disk, it checks the drive serial against
+  the diagnostics record, and you type the drive serial to confirm. Since
+  erase-partition.sh v17 it also refuses if the CIAD or machine number doesn't match
+  the opening diagnostics.
+- **To type the serial at the target instead** (or just watch), open a terminal there
+  and run `screen -x erase`. Both screens show the same session.
+- **If the laptop sleeps or the connection drops**, the erase keeps running on the
+  target. Re-run `open-machine.sh` with the same arguments: it re-checks everything,
+  skips what's done (scripts already there, diagnostics already run), and re-attaches.
+- **Multi-disk machines:** answer `y` to "Erase another disk on this machine?" and pick
+  the next disk.
+- The end prints `erase_result`. Anything but `pass` means: not ready for Windows.
+
+**Closing (steps 11–12).** New live boot. At the target, the same three
+`enable-ssh.sh` lines as above (a new boot means a new session code). On the laptop:
+```
+scripts/laptop/close-machine.sh <ip> <tag>
+```
+It checks the session code and the serial as above. Then it compares the identity typed
+at the target with what was recorded at the opening pass
+(`<asset tag>/identity-opening.env` and `summary.csv`): chassis serial, machine number
+and asset tag must all agree, and the opening erase must be `pass`. Each disagreement is
+listed on its own line. Then: fetch and check `diagnostics.sh`, `push-summary.sh`,
+closing diagnostics, and the pull, which reports GREEN or not.
+
+**When a check refuses**, the message names the value that disagreed and what it was
+compared with. Nothing has been erased or sent at that point.
+- **Typo at the target:** re-run `enable-ssh.sh` there (it rewrites `identity.env`;
+  sshd stays up) and run the laptop script again.
+- **Wrong IP or wrong screen:** use the IP and code from the right machine's card.
+- **Genuinely changed CIAD:** correct the records by hand first. The scripts won't
+  guess.
+
+**Machines opened before v16** (no `identity-opening.env` in their folder):
+`close-machine.sh` refuses them. Close them with the manual commands below.
+`pull-results.sh`/`push-summary.sh` now ask for a session code too. On a target whose
+enable-ssh.sh predates v16 there's no code on screen, so run
+`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there and type the last 6
+characters of its `SHA256:` value instead.
+
+### Diagnostics + SSH stage — manual walkthrough (steps 2–4, 11–12)
+
+The manual commands, for machines opened before v16 and as a fallback. Concrete commands
+for the Ubuntu-Live diagnostics and SSH-results-pull portions of the
 workflow above — both the opening pass (steps 2–3) and the closing pass (steps 11–12)
 use the same fetch → verify → run pattern (CLAUDE.md, "Delivery to target machines").
 

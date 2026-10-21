@@ -20,7 +20,8 @@ running Windows 11 on unsupported hardware.
 ```
 scripts/linux/     diagnostics.sh, erase-partition.sh, enable-ssh.sh
 scripts/windows/   *.ps1 (update loop, etc.)
-scripts/laptop/    pull-results.sh, push-summary.sh, combine-summary.sh — run on the
+scripts/laptop/    open-machine.sh, close-machine.sh, pull-results.sh, push-summary.sh,
+                   combine-summary.sh, lib-target.sh (shared checks) — run on the
                    laptop, not a target machine; not part of the
                    raw.githubusercontent.com delivery path above
 docs/              methodology.md, known-issues.md, toolkit-reference.md, open-questions.md,
@@ -91,6 +92,13 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/xxsdf-james/le_relais_r
 Get-FileHash <file>.ps1 -Algorithm SHA256    # compare with the value in the Obsidian note
 powershell -ExecutionPolicy Bypass -File .\<file>.ps1
 ```
+
+Laptop-driven passes (v16+, `docs/toolkit-reference.md`): only `enable-ssh.sh` is fetched
+and checked by hand at the target, against the Obsidian value. `open-machine.sh` /
+`close-machine.sh` then fetch `diagnostics.sh` / `erase-partition.sh` on the target
+with the same `wget` at a tag, and check them against SHA-256 values computed from the
+laptop repo's own copy of that tag (`git show <tag>:path`). Still a download checked
+before running, never a pipe into a shell.
 
 Publishing: commit and tag locally, present the `push` command(s) for James to run himself
 (see "How to work" — auth-key commands are his to run), then print the new checksums. Only
