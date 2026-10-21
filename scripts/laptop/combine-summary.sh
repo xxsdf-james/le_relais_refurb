@@ -60,6 +60,12 @@ COMBINED_HEADER="$EXPECTED_HEADER,wifi_card,machine_number"
 # A card disabled in the BIOS doesn't show up in lspci/lshw and reads as "no".
 wifi_card() {
   local dir="$1" logs
+  # pipefail off in here: when grep -q finds its match in the first log and
+  # exits, cat is still writing the next one and dies of SIGPIPE. With
+  # pipefail that failed the whole test, so a machine with Wi-Fi could
+  # intermittently read as "no" (seen once on CIAD7452, 2026-10-21).
+  local -
+  set +o pipefail
   logs=("$dir"/diag_*.txt)
   [ "${#logs[@]}" -gt 0 ] || { echo unknown; return; }
   if cat "${logs[@]}" | grep -qE '^[0-9a-f:.]+ Network controller:' \
