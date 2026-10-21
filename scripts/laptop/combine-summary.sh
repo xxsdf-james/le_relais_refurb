@@ -78,15 +78,9 @@ wifi_card() {
   fi
 }
 
-# Prints the distinct 3-digit numbers in the folder's log filenames
-# (diag_<NNN>_<CIAD>_<stage>.txt, erase_<NNN>_<CIAD>.txt), one per line.
-# Exactly one is expected; none or several is reported by the caller.
-machine_numbers() {
-  local dir="$1" f
-  for f in "$dir"/diag_*.txt "$dir"/erase_*.txt; do
-    basename "$f"
-  done | sed -nE 's/^(diag|erase)_([0-9]{3})_.*\.txt$/\2/p' | sort -u
-}
+# machine_numbers(): shared with open-machine.sh's registry check.
+# shellcheck source=lib-target.sh
+source "$SCRIPT_DIR/lib-target.sh"
 
 shopt -s nullglob
 FILES=("$LOCAL_BASE"/*/summary.csv)

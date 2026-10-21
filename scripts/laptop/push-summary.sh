@@ -66,7 +66,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEFAULT_RESULTS_DIR="$(dirname "$REPO_ROOT")/le_relais_refurb_results"
 
-KEY="$HOME/.ssh/id_ed25519_refurb"
 LOCAL_BASE="${LE_RELAIS_RESULTS_DIR:-$DEFAULT_RESULTS_DIR}"
 LOCAL_SUMMARY="$LOCAL_BASE/$MACHINE_LABEL/summary.csv"
 
@@ -88,11 +87,12 @@ LOCAL_SERIAL=$(echo "$LOCAL_ROW" | awk -F',' '{print $1}' | tr -d '"')
 LOCAL_CIAD=$(echo "$LOCAL_ROW" | awk -F',' '{print $2}' | tr -d '"')
 
 # --- Remote checks -----------------------------------------------------------
-# Same fresh-host-key handling as pull-results.sh (docs/ssh-access.md).
-ssh-keygen -R "$TARGET_IP" >/dev/null 2>&1 || true
-ssh-keyscan -t ed25519 "$TARGET_IP" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+# Same pinned-key handling as pull-results.sh (lib-target.sh, docs/ssh-access.md).
+# shellcheck source=lib-target.sh
+source "$SCRIPT_DIR/lib-target.sh"
+ensure_host "$TARGET_IP"
 
-SSH=(ssh -i "$KEY" "${REMOTE_USER}@${TARGET_IP}")
+SSH=(ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${TARGET_IP}")
 
 # Same extraction diagnostics.sh uses for machine_serial, so the two can't
 # disagree on formatting. The live user has passwordless sudo on Ubuntu Live.
@@ -114,7 +114,7 @@ echo "Target serial $REMOTE_SERIAL matches $MACHINE_LABEL (CIAD $LOCAL_CIAD)."
 echo "Pushing $LOCAL_SUMMARY -> ${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv"
 
 "${SSH[@]}" "mkdir -p $REMOTE_DIR_Q"
-scp -i "$KEY" "$LOCAL_SUMMARY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv"
+scp "${SSH_OPTS[@]}" "$LOCAL_SUMMARY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv"
 
 echo ""
 echo "Done. Now run closing diagnostics on the target (fetched into the same"

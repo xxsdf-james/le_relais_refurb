@@ -55,23 +55,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 DEFAULT_RESULTS_DIR="$(dirname "$REPO_ROOT")/le_relais_refurb_results"
 
-KEY="$HOME/.ssh/id_ed25519_refurb"
 LOCAL_BASE="${LE_RELAIS_RESULTS_DIR:-$DEFAULT_RESULTS_DIR}"
 LOCAL_DEST="$LOCAL_BASE/$MACHINE_LABEL"
 
-mkdir -p "$LOCAL_DEST"
-
 # Each live-session boot has a fresh, unpersisted host key (docs/ssh-access.md,
-# "REMOTE HOST IDENTIFICATION HAS CHANGED"), and the interactive accept prompt
-# for a new key doesn't reliably get answered when scp runs nested in a
-# script (confirmed 2026-09-28) — so replace whatever's cached for this IP
-# with a freshly scanned key every time, non-interactively.
-ssh-keygen -R "$TARGET_IP" >/dev/null 2>&1 || true
-ssh-keyscan -t ed25519 "$TARGET_IP" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+# "REMOTE HOST IDENTIFICATION HAS CHANGED"). Until 2026-10-21 this script
+# re-scanned and trusted whatever key answered at the IP. Now it uses the key
+# verified with the session code (lib-target.sh), and asks for the code if
+# there's none for this IP or the machine there presents a different key.
+# shellcheck source=lib-target.sh
+source "$SCRIPT_DIR/lib-target.sh"
+ensure_host "$TARGET_IP"
+
+# Before anything lands in $LOCAL_DEST: the target's results must be this
+# label's machine. The session code only proves which machine is at the IP,
+# not that it's the one the label names. (Added 2026-10-21, found in a dry
+# run: a pull under the wrong label overwrote another machine's summary.csv.)
+INCOMING_SUMMARY=$(mktemp)
+trap 'rm -f "$INCOMING_SUMMARY"' EXIT
+scp "${SSH_OPTS[@]}" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv" "$INCOMING_SUMMARY" \
+  || die "No ${REMOTE_RESULTS_DIR}/summary.csv on the target — has diagnostics.sh run there?"
+INCOMING_SERIAL=$(summary_field "$INCOMING_SUMMARY" 1)
+REMOTE_ASSET=$(ssh "${SSH_OPTS[@]}" -n "${REMOTE_USER}@${TARGET_IP}" "cat ${REMOTE_RESULTS_DIR}/identity.env 2>/dev/null" \
+  | sed -n 's/^ASSET_TAG=//p' || true)
+if [ -n "$REMOTE_ASSET" ] && [ "$REMOTE_ASSET" != "$MACHINE_LABEL" ]; then
+  die "The target was identified as asset tag $REMOTE_ASSET (identity.env), not $MACHINE_LABEL. Nothing pulled."
+fi
+if [ -f "$LOCAL_DEST/summary.csv" ] && [ "$(summary_field "$LOCAL_DEST/summary.csv" 1)" != "$INCOMING_SERIAL" ]; then
+  die "$MACHINE_LABEL/summary.csv is for serial $(summary_field "$LOCAL_DEST/summary.csv" 1), but the target's is $INCOMING_SERIAL. Wrong label or wrong IP — nothing pulled."
+fi
+
+mkdir -p "$LOCAL_DEST"
 
 echo "Pulling from ${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/ -> $LOCAL_DEST"
 
-if ! scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/diag_*.txt" "$LOCAL_DEST/" 2>/dev/null; then
+if ! scp "${SSH_OPTS[@]}" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/diag_*.txt" "$LOCAL_DEST/" 2>/dev/null; then
   echo "No diag_*.txt matched (fine if this pull is erase-only, or that stage hasn't run yet)."
 fi
 
@@ -80,7 +98,7 @@ fi
 # glob. (Bug fixed 2026-09-28: this script only ever fetched diag_*.txt,
 # so an erase-only pull silently came back with nothing — not an SSH or
 # results/ path problem, just a missing pattern here.)
-if ! scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/erase_*.txt" "$LOCAL_DEST/" 2>/dev/null; then
+if ! scp "${SSH_OPTS[@]}" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/erase_*.txt" "$LOCAL_DEST/" 2>/dev/null; then
   echo "No erase_*.txt matched (fine if this pull is diagnostics-only, or that stage hasn't run yet)."
 fi
 
@@ -91,13 +109,13 @@ if [ -f "$SUMMARY_DEST" ]; then
   cp -p "$SUMMARY_DEST" "$SUMMARY_BACKUP"
   echo "Backed up existing summary.csv -> $SUMMARY_BACKUP"
 fi
-scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/summary.csv" "$SUMMARY_DEST"
+cp "$INCOMING_SUMMARY" "$SUMMARY_DEST"
 
 # drives.csv: one row per disk, only on machines with more than one internal
 # disk (diagnostics.sh v0.11). A closing session usually has none, since
 # the extra disk is out by then, so a missing remote file keeps the local one.
 DRIVES_TMP=$(mktemp)
-if scp -i "$KEY" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/drives.csv" "$DRIVES_TMP" 2>/dev/null; then
+if scp "${SSH_OPTS[@]}" "${REMOTE_USER}@${TARGET_IP}:${REMOTE_RESULTS_DIR}/drives.csv" "$DRIVES_TMP" 2>/dev/null; then
   if [ -f "$LOCAL_DEST/drives.csv" ]; then
     cp -p "$LOCAL_DEST/drives.csv" "$LOCAL_DEST/drives.csv.$(date +%Y%m%d-%H%M%S).bak"
   fi
