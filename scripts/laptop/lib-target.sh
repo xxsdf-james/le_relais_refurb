@@ -185,6 +185,11 @@ registry_check_opening() {
   if [ -n "$nums" ] && [ "$nums" != "$ID_NUMBER " ]; then
     problems+=("Folder $ID_ASSET's logs are for machine number ${nums% }, not $ID_NUMBER.")
   fi
+  # N tags aren't official CIADs: they're "N" + the chassis serial's last 4.
+  # A mismatch is a misread sticker (048 was opened as N2635, serial S4BN2535).
+  if [[ "$ID_ASSET" =~ ^N[0-9]{4}$ ]] && [ "${ID_ASSET#N}" != "${ID_SERIAL: -4}" ]; then
+    problems+=("Asset tag $ID_ASSET doesn't match chassis serial $ID_SERIAL: an N tag is N + the serial's last 4 (N${ID_SERIAL: -4}).")
+  fi
   if [ "${#problems[@]}" -gt 0 ]; then
     printf '  - %s\n' "${problems[@]}" >&2
     die "The identity typed at the target conflicts with the laptop's records (above). Check the stickers; re-run enable-ssh.sh there if it was mistyped."

@@ -175,7 +175,8 @@ It asks for the session code, then checks, in order, and stops at the first prob
 2. The target's `identity.env` serial matches what `dmidecode` reads now.
 3. Laptop records: the number, asset tag and serial aren't already used by another
    machine's folder. If this asset tag's folder exists (a re-run), it's for this serial
-   and number.
+   and number. An N tag (no official CIAD) must be N + the chassis serial's last 4
+   characters: a misread sticker typed the same way twice passes the double entry.
 4. The target's own `results/`: nothing from another machine, and not a machine at
    closing stage (GREEN / windows_verified).
 5. `diagnostics.sh` and `erase-partition.sh` are fetched at `<repo-tag>` and checked against
