@@ -79,7 +79,8 @@ verify_host() {
   code=$(session_code "$scan")
   fp_tail=$(fingerprint_tail "$scan")
   for attempt in 1 2 3; do
-    read -rp "Session code on the target's screen (for $ip): " typed
+    read -rp "Session code on the target's screen (for $ip): " typed \
+      || die "No answer (end of input) — stopping. Run this in a terminal, not with !. Nothing was sent to $ip."
     typed=$(echo "$typed" | tr -d '[:space:]')
     if [ "$(echo "$typed" | tr '[:lower:]' '[:upper:]')" = "$code" ] || [ "$typed" = "$fp_tail" ]; then
       mkdir -p "$PIN_DIR"
