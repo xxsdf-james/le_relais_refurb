@@ -9,6 +9,15 @@
 # scope (activation only exists inside a booted Windows session; it's checked
 # there, see toolkit-reference.md).
 #
+# v0.12 changes (2026-10-21, paired with enable-ssh.sh v16 and the
+# laptop-driven passes, scripts/laptop/open-machine.sh / close-machine.sh):
+#   - If results/identity.env exists (written by enable-ssh.sh from the
+#     stickers, typed at this machine's keyboard), the machine number and
+#     CIAD come from it and aren't prompted for. Only the stage is asked.
+#   - Stops before recording anything if that file's chassis serial differs
+#     from the one dmidecode reads now (a file from another machine).
+#   - Without the file, prompts exactly as before.
+#
 # v0.11 changes (2026-10-19, multi-disk support, paired with
 # erase-partition.sh v15):
 #   - On a machine with more than one internal disk, every disk's type,
@@ -148,8 +157,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESULTS_DIR="$SCRIPT_DIR/results"
 mkdir -p "$RESULTS_DIR"
  
-read -rp "Machine ID/label: " MACHINE_ID
-read -rp "CIAD number (manual entry, traceability to legacy tracking): " CIAD_NUMBER
+IDENTITY_FILE="$RESULTS_DIR/identity.env"
+IDENTITY_SERIAL=""
+if [ -f "$IDENTITY_FILE" ]; then
+  # Read line by line, not sourced: it's data, not code.
+  MACHINE_ID=$(sed -n 's/^MACHINE_NUMBER=//p' "$IDENTITY_FILE")
+  CIAD_NUMBER=$(sed -n 's/^ASSET_TAG=//p' "$IDENTITY_FILE")
+  IDENTITY_SERIAL=$(sed -n 's/^CHASSIS_SERIAL=//p' "$IDENTITY_FILE")
+  if [ -z "$MACHINE_ID" ] || [ -z "$CIAD_NUMBER" ]; then
+    echo "ERROR: $IDENTITY_FILE is incomplete — re-run enable-ssh.sh." >&2
+    exit 1
+  fi
+  echo "Machine number $MACHINE_ID, CIAD $CIAD_NUMBER (from results/identity.env)"
+else
+  read -rp "Machine ID/label: " MACHINE_ID
+  read -rp "CIAD number (manual entry, traceability to legacy tracking): " CIAD_NUMBER
+fi
 while :; do
   read -rp "Stage (before/after): " STAGE || exit 1
   STAGE="${STAGE,,}"
@@ -219,7 +242,14 @@ log "\n=== Machine Identity ==="
 log "Machine label  : $MACHINE_ID"
 log "Serial number  : $SERIAL   (machine/chassis serial — dmidecode -t system, methodology.md §3. NOT the drive serial below.)"
 log "CIAD number    : $CIAD_NUMBER   (manual entry, legacy-system traceability)"
- 
+
+if [ -n "$IDENTITY_SERIAL" ] && [ "$IDENTITY_SERIAL" != "$SERIAL" ]; then
+  log "ERROR: results/identity.env was written for chassis serial $IDENTITY_SERIAL,"
+  log "but this machine's is $SERIAL. Nothing recorded. Re-run enable-ssh.sh on"
+  log "this machine, then this script."
+  exit 1
+fi
+
 CPU_MODEL="unknown"
 have lscpu && CPU_MODEL=$(lscpu | awk -F': *' '/Model name/{print $2; exit}')
  

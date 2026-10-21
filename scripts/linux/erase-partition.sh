@@ -139,6 +139,19 @@
 #     once verification has passed. A failing or unreadable result stops
 #     before the zap; a fail is written to summary.csv's smart_status.
 #
+# v17 changes (2026-10-21, paired with enable-ssh.sh v16 / diagnostics.sh
+# v0.12, for the laptop-driven passes over SSH):
+#   - If results/identity.env exists (written by enable-ssh.sh from the
+#     stickers, at this machine's keyboard), the machine number and CIAD
+#     come from it instead of prompts. Its chassis serial must match the
+#     one dmidecode reads now.
+#   - §3: a CIAD that differs from this machine's summary.csv row is now
+#     fatal (was a warning). So is a machine number with no opening
+#     diagnostics log (diag_<number>_<CIAD>_before.txt) in results/. With
+#     the erase now startable from the laptop, these are what stop it on a
+#     machine other than the one intended. A genuinely changed CIAD has to
+#     be corrected in summary.csv by hand first.
+#
 # v8 changes (Windows-only batch — 36 machines, IT dept priority,
 # 2026-09-28, paired with diagnostics.sh v0.7):
 #   - Header comment and the end-of-run reminder updated for the retired
@@ -430,9 +443,21 @@ fi
 # ============================================================================
 # 1. Identity prompts + report file (CIAD number in filename)
 # ============================================================================
-read -rp "Machine ID/label: " MACHINE_ID
-read -rp "CIAD number: " CIAD_NUMBER
- 
+IDENTITY_FILE="$RESULTS_DIR/identity.env"
+IDENTITY_SERIAL=""
+if [ -f "$IDENTITY_FILE" ]; then
+  # Read line by line, not sourced: it's data, not code.
+  MACHINE_ID=$(sed -n 's/^MACHINE_NUMBER=//p' "$IDENTITY_FILE")
+  CIAD_NUMBER=$(sed -n 's/^ASSET_TAG=//p' "$IDENTITY_FILE")
+  IDENTITY_SERIAL=$(sed -n 's/^CHASSIS_SERIAL=//p' "$IDENTITY_FILE")
+  { [ -n "$MACHINE_ID" ] && [ -n "$CIAD_NUMBER" ]; } \
+    || die "$IDENTITY_FILE is incomplete — re-run enable-ssh.sh. Nothing was erased."
+  echo "Machine number $MACHINE_ID, CIAD $CIAD_NUMBER (from results/identity.env)"
+else
+  read -rp "Machine ID/label: " MACHINE_ID
+  read -rp "CIAD number: " CIAD_NUMBER
+fi
+
 OUT="$RESULTS_DIR/erase_${MACHINE_ID}_${CIAD_NUMBER}.txt"
 log() { echo -e "$1" | tee -a "$OUT"; }
 run_logged() {
@@ -466,7 +491,10 @@ if have dmidecode; then
 fi
 log "Machine serial  : $SERIAL   (chassis serial — dmidecode -t system, methodology.md §3. NOT the drive serial detected below.)"
 [ "$SERIAL" = "unknown" ] && die "Could not read this machine's chassis serial (dmidecode -t system) — cannot look up its summary.csv row without it. Investigate manually (missing dmidecode? BIOS not exposing a serial?) before proceeding."
- 
+if [ -n "$IDENTITY_SERIAL" ] && [ "$IDENTITY_SERIAL" != "$SERIAL" ]; then
+  die "results/identity.env was written for chassis serial $IDENTITY_SERIAL, but this machine's is $SERIAL. Re-run enable-ssh.sh on this machine. Nothing was erased."
+fi
+
 # --- Resume checkpoint ------------------------------------------------------
 # See v6 changelog above. Written after sanitization succeeds and again
 # after verification passes; consumed (and validated against the freshly
@@ -653,10 +681,10 @@ fi
 # summary.csv is ONE ROW PER MACHINE, keyed on machine_serial (chassis
 # serial) — methodology.md §3's source of truth. This script now reads its
 # own chassis serial (§1b) so it looks up the same row diagnostics.sh
-# creates/updates, the same way diagnostics.sh does. CIAD number is
-# checked too, but only as a secondary consistency signal — it's manual
-# entry, not the source of truth, so a mismatch there is logged as a
-# warning, not fatal.
+# creates/updates, the same way diagnostics.sh does. Since v17 the CIAD
+# number and the machine number must also agree with the opening
+# diagnostic (fatal otherwise): the serial says which row is this
+# machine's, the CIAD and number say it's the machine you meant.
 #
 # The real safety gate is unchanged in spirit from prior versions: once
 # the row is found, its recorded drive_serial is compared against the
@@ -680,10 +708,11 @@ fi
  
 RECORDED_CIAD=$(echo "$MACHINE_ROWS" | awk -F',' '{print $2}' | tr -d '"')
 if [ "$RECORDED_CIAD" != "$CIAD_NUMBER" ]; then
-  log "WARNING: this machine's row is recorded under CIAD $RECORDED_CIAD, but you just"
-  log "entered CIAD $CIAD_NUMBER. machine_serial ($SERIAL) is the actual match key, so"
-  log "proceeding — but double-check you didn't mistype the CIAD number, or that it"
-  log "hasn't genuinely changed. This run will update the row's CIAD to $CIAD_NUMBER."
+  die "This machine's row (serial $SERIAL) is recorded under CIAD $RECORDED_CIAD, but this run is for CIAD $CIAD_NUMBER. Either this is not the machine you meant, or the CIAD was mistyped at one of the two steps. If the CIAD genuinely changed, correct it in summary.csv by hand first. Nothing was erased."
+fi
+if [ ! -f "$RESULTS_DIR/diag_${MACHINE_ID}_${CIAD_NUMBER}_before.txt" ]; then
+  FOUND_DIAG=$(cd "$RESULTS_DIR" && compgen -G 'diag_*_before.txt' | tr '\n' ' ')
+  die "No opening diagnostics log for machine $MACHINE_ID / CIAD $CIAD_NUMBER (diag_${MACHINE_ID}_${CIAD_NUMBER}_before.txt) in $RESULTS_DIR. Found: ${FOUND_DIAG:-none}. Check the machine number on the box. Nothing was erased."
 fi
  
 if [ "$MULTI_DISK" -eq 1 ]; then
