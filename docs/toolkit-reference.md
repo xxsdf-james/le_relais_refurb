@@ -43,7 +43,7 @@ The **Toolbox USB is retired** (CLAUDE.md, "Out of scope / superseded") — scri
 
 The Toolbox USB is retired. Scripts are fetched directly on the target machine from
 this repo via `raw.githubusercontent.com`, pinned to a tag, and checked against a
-SHA-256 value kept in Hamish's Obsidian note — see CLAUDE.md, "Delivery to target machines," for
+SHA-256 value kept in James's Obsidian note — see CLAUDE.md, "Delivery to target machines," for
 the exact `wget`/`sha256sum` (Linux) and `Invoke-WebRequest`/`Get-FileHash` (Windows)
 commands. Diagnostic/erase results and logs leave the machine over SSH instead of a
 physical USB — see `docs/ssh-access.md`.
@@ -112,7 +112,7 @@ this — it's kept for when that phase resumes.
 10. ~~Fetch and run enable-ssh.ps1~~ — **currently skipped, batch-wide**: Windows-side SSH
     timed out because of a Private-only firewall rule (root-caused 2026-10-20,
     `known-issues.md`, "Remote access (SSH)"). The fixed scripts passed on the test VM, and
-    bringing this step back is Hamish's call (with IT's agreement). Until then, Windows results
+    bringing this step back is James's call (with IT's agreement). Until then, Windows results
     (update-loop completion, activation) are verified manually at the console (steps
     8–9) rather than pulled over SSH; the only diagnostic file that leaves the machine
     over SSH is `diag_after`, from the Ubuntu Live closing-diagnostics boot (steps

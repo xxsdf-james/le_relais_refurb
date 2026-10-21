@@ -1,12 +1,12 @@
 # 25H2 → 26H2 upgrade (tested, set aside) — DRAFT, 2026-10-19
 
-**Status:** not used in this batch. Decision (Hamish, with Le Relais IT, 2026-10-19): every
+**Status:** not used in this batch. Decision (James, with Le Relais IT, 2026-10-19): every
 machine stays on 25H2, which has had a year of fixes. This procedure is kept for the
 upgrade that becomes necessary before 25H2 Home/Pro stops getting security updates on
 **12 October 2027** (third-party sites citing Microsoft's servicing table; Microsoft's own
 lifecycle page not opened).
 
-**Tested:** on 038 (M900z, 25H2), 2026-10-19, by Hamish. The download and every command
+**Tested:** on 038 (M900z, 25H2), 2026-10-19, by James. The download and every command
 below worked. Not recorded: how long it took, the resulting build number, and the
 activation/watermark checks one by one. 038 was then reinstalled with 25H2.
 

@@ -2,7 +2,7 @@
 
 ## Context
 
-Refurbishing retired PCs for Fondation Le Relais, as part of Hamish's ELAN professional
+Refurbishing retired PCs for Fondation Le Relais, as part of James's ELAN professional
 reintegration internship. Le Relais moved its fleet to Windows 11 and retired 100+ machines
 that are not officially supported for Windows 11. They are wiped, reinstalled, and passed
 on to people with low budgets, with a clear disclosure of the security/support caveat of
@@ -12,8 +12,8 @@ running Windows 11 on unsupported hardware.
 - Current priority: 36 machines as Windows-only (activated, fully updated, no open-source
   apps), via a mostly scripted workflow. Dual-boot with Linux (Mint under consideration,
   not final) comes later.
-- Printers and monitors are out of scope unless Hamish says otherwise.
-- Audience: Hamish, occasionally the main IT person at Le Relais. Nothing more formal.
+- Printers and monitors are out of scope unless James says otherwise.
+- Audience: James, occasionally the main IT person at Le Relais. Nothing more formal.
 
 ## Repo layout
 
@@ -35,7 +35,7 @@ Real results (`summary.csv`, per-machine `.txt` logs) never go in the repo.
 A Claude Code session's `git status` may show untracked dotfiles/dirs in the repo root
 (`.bashrc`, `.gitconfig`, `.vscode`, `.idea`, `.mcp.json`, `.claude/`, etc.). These are
 artifacts of the sandbox environment the session runs in, not real files in this location
-on Hamish's actual filesystem — confirmed by Hamish, 2026-09-28. Don't try to clean them
+on James's actual filesystem — confirmed by James, 2026-09-28. Don't try to clean them
 up, `.gitignore` them, or otherwise treat them as project clutter.
 
 ## Status of the docs
@@ -49,10 +49,10 @@ investigate rather than deferring to the doc.
 - Evidence-based, mechanistic troubleshooting. Verify claims, including your own, before
   asserting them. Search the web for anything version-specific or likely to have changed.
 - When giving a fix or workflow step, say briefly why it works.
-- Push back directly on risky proposals, including Hamish's. Name the actual risk.
+- Push back directly on risky proposals, including James's. Name the actual risk.
 - Ask when an ambiguity would change the answer: decisions here apply to ~100 machines.
-- Don't promote any doc to "final" unless Hamish says so.
-- **Any command that needs Hamish's own auth (git push/tag push, scp/ssh with his key,
+- Don't promote any doc to "final" unless James says so.
+- **Any command that needs James's own auth (git push/tag push, scp/ssh with his key,
   `gh`, etc.): don't run it — present the exact command(s) for him to type himself.**
   Confirmed 2026-09-28 after a `git push` attempt was denied. Commit/tag locally are fine;
   the push itself, and anything else requiring his credentials, is his to run.
@@ -75,7 +75,7 @@ don't trust (confirmed for powershellgallery.com and gist.githubusercontent.com)
 `github.com` and `raw.githubusercontent.com` pass through untouched (confirmed 2026-09-28).
 
 Scripts are fetched from this repo via `raw.githubusercontent.com`, pinned to a tag, and
-checked against a SHA-256 value Hamish keeps in an Obsidian note. Never pipe a
+checked against a SHA-256 value James keeps in an Obsidian note. Never pipe a
 download into a shell.
 
 ```
@@ -92,9 +92,9 @@ Get-FileHash <file>.ps1 -Algorithm SHA256    # compare with the value in the Obs
 powershell -ExecutionPolicy Bypass -File .\<file>.ps1
 ```
 
-Publishing: commit and tag locally, present the `push` command(s) for Hamish to run himself
+Publishing: commit and tag locally, present the `push` command(s) for James to run himself
 (see "How to work" — auth-key commands are his to run), then print the new checksums. Only
-Hamish publishes.
+James publishes.
 
 ## Out of scope / superseded
 
@@ -110,14 +110,14 @@ Hamish publishes.
 ## Open items
 
 - Where diagnostic results go now that the Toolbox USB is gone: RESOLVED for the current
-  36-machine Windows-only batch (Hamish, 2026-09-28) — SSH (`docs/ssh-access.md`) is the
+  36-machine Windows-only batch (James, 2026-09-28) — SSH (`docs/ssh-access.md`) is the
   routine mechanism for every machine, not just ad hoc/troubleshooting use, since results
   are pulled and `summary.csv` updated over SSH on each machine. Whether this extends as
   the standard mechanism beyond this batch (toward the full ~100 machines / future phases)
   is still open.
 - How activation keys reach Windows machines without being in this repo.
 - Internal asset-labeling scheme: unresolved at Le Relais. Don't invent one.
-- How to update/merge `summary.csv` across machines and sessions: RESOLVED (Hamish,
+- How to update/merge `summary.csv` across machines and sessions: RESOLVED (James,
   2026-09-29). One `summary.csv` per machine folder on the laptop; `push-summary.sh`
   sends it back before closing diagnostics so the row is updated in place, and
   `combine-summary.sh` stacks the per-machine files into the single deliverable. See

@@ -76,5 +76,5 @@ Getting captures off a target machine used to share the same open blocker as rou
 `docs/ssh-access.md` now gives a working answer for ad hoc/troubleshooting use
 (CONFIRMED 2026-09-28, used for the 002-sata-ssd fixtures) — whether that becomes the
 standard answer for routine `diagnostics.sh` runs across all ~100 machines, versus
-just the bench-troubleshooting case it was built for, is still Hamish's call, not
+just the bench-troubleshooting case it was built for, is still James's call, not
 decided here.
