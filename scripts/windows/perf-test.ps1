@@ -9,6 +9,12 @@
   password sits in the registry in clear text (that is how Windows
   auto-logon works).
 
+  A MACHINE USED FOR THIS TEST MUST BE REINSTALLED (fresh Windows) BEFORE IT
+  GOES TO A LEARNER, even after -Cleanup. -Cleanup removes what this script
+  knows it added; the reinstall also removes everything else the test
+  involved (e.g. Office from install-office.ps1). Copy the results off first:
+  the reinstall wipes C:.
+
   Modes (run from an elevated Windows PowerShell unless noted):
 
     -Setup -Label H1 [-Runs 9]
@@ -595,6 +601,9 @@ if ($Cleanup) {
         Write-Host "account $User and its profile removed"
     }
     Write-Host "Results kept in $ResDir"
+    Write-Host ''
+    Write-Host 'NEXT: copy the results off this machine, then REINSTALL Windows before it' -ForegroundColor Yellow
+    Write-Host 'goes to a learner. -Cleanup alone is not enough (see the header of this file).' -ForegroundColor Yellow
     exit 0
 }
 

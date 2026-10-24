@@ -521,6 +521,10 @@ Before a machine leaves for its recipient:
   Activation, which lagged confirmed API-level state in a real session (2026-09-29).
 - [ ] **Refurb tooling removed from the machine** — also done at step 9 (walkthrough
   step 5), so no extra Windows boot is needed after closing diagnostics.
+- [ ] **Not used for `perf-test.ps1` since its last Windows install.** If it was, it
+  must be reinstalled first (fresh Windows, then the update stage again), even if
+  `-Cleanup` ran: the test leaves an auto-logon local Administrator whose password
+  was stored in plaintext, and Office. Copy the results off before the reinstall.
 - [ ] **Closing pull showed status GREEN** with no warnings from `pull-results.sh`.
 
 ## Open items / TODO
