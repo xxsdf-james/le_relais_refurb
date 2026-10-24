@@ -38,7 +38,17 @@ jobs:
             Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
           }
           $all = Invoke-ScriptAnalyzer -Path scripts/windows -Recurse -Severity Error, Warning
-          $all | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize -Wrap
+          # One line per finding, as a GitHub annotation: shown inline on the PR,
+          # and readable from the public checks API without a login. Errors
+          # first: GitHub keeps only 10 annotations per level per step.
+          foreach ($f in ($all | Sort-Object { $_.Severity -ne 'Error' })) {
+            $level = if ($f.Severity -eq 'Error') { 'error' } else { 'warning' }
+            $file = (Resolve-Path -Relative $f.ScriptPath) -replace '^\.[\\/]', ''
+            $msg = ($f.Message -replace '\r?\n', ' ')
+            Write-Output "::$level file=$file,line=$($f.Line),title=$($f.RuleName)::$msg"
+          }
+          $all | Group-Object Severity, RuleName | Sort-Object Count -Descending |
+            Format-Table Count, Name -AutoSize | Out-String -Width 200
           # Warnings don't fail the build yet: they haven't been reviewed one by
           # one. Each gets fixed or excluded with a reason in a later PR, then
           # this check tightens to Warning.
