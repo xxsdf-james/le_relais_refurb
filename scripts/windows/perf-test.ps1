@@ -68,6 +68,11 @@
   as ANSI, so accented characters would be mangled.
 #>
 
+# Accepted exception, see the Justification. PSScriptAnalyzer can't suppress a
+# single line, so this covers the whole file; there is one instance (-Setup).
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingConvertToSecureStringWithPlainText', '',
+    Justification = 'Auto-logon for the throwaway perftest account (a local Administrator) needs the password in plaintext in the registry (Winlogon DefaultPassword) anyway, so a SecureString would protect nothing. The password is random and used only on a test install. -Cleanup deletes both the stored password and the account, but the exception rests on the procedure: a machine used for perf-test MUST be reinstalled before it goes to a learner. Get-Random is not cryptographically secure; acceptable for the same reason.')]
 param(
     [switch]$Setup,
     [switch]$Cycle,
