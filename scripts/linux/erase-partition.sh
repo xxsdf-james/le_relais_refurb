@@ -646,7 +646,6 @@ fi
 # detected, this refuses to resume rather than risk acting on stale state
 # against a machine that may have been swapped in the meantime.
 # ============================================================================
-RESUME_MODE=0
 SKIP_ERASE=0
 SKIP_VERIFY=0
 if [ -f "$STATE_FILE" ]; then
@@ -664,7 +663,6 @@ if [ -f "$STATE_FILE" ]; then
         log "Starting a full run as requested — this WILL re-sanitize the drive."
         ;;
       *)
-        RESUME_MODE=1
         case "$RESUME_STAGE" in
           erase)  SKIP_ERASE=1 ;;
           verify) SKIP_ERASE=1; SKIP_VERIFY=1 ;;
@@ -758,7 +756,6 @@ echo "  Capacity : ${CAP_GB} GB"
 echo "  Type     : $STORAGE_TYPE"
 echo ""
 read -rp "Type the LAST 4+ CHARACTERS of the drive serial above to confirm: " CONFIRM_INPUT
-SERIAL_TAIL="${DRIVE_SERIAL: -4}"
 case "$DRIVE_SERIAL" in
   *"$CONFIRM_INPUT") ;;
   *) die "Confirmation input '$CONFIRM_INPUT' does not match the end of serial '$DRIVE_SERIAL'. Nothing was erased." ;;
@@ -976,7 +973,6 @@ if [ "$ERASE_EXIT" -ne 0 ]; then
   log "\n*** SANITIZATION FAILED (exit $ERASE_EXIT) — STOPPING. No partitioning will be attempted. ***"
   log "This machine needs manual investigation before proceeding."
   # Still write the CSV row (see §8) so the failure is on record, not silent.
-  ERASE_ROW_STATUS="fail"
 else
   log "\nSanitization command completed (exit $ERASE_EXIT)."
   write_state "erase"
