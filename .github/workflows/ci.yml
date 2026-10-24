@@ -1,0 +1,56 @@
+# Static checks on every push and pull request. Nothing here runs a target-side
+# script: shellcheck and PSScriptAnalyzer only read the files, and gitleaks only
+# reads the git history.
+#
+# Actions are pinned to a commit SHA, not a tag: a tag can be moved to other
+# code later, a commit can't (same reasoning as checking a script's SHA-256
+# before running it on a target machine).
+
+name: CI
+
+on:
+  push:
+    branches: [main, refactor]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read   # gitleaks lists the PR's commits
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - name: shellcheck (warning and above)
+        run: |
+          shellcheck --version
+          shellcheck -S warning scripts/linux/*.sh scripts/laptop/*.sh tests/fixtures/*.sh
+
+  psscriptanalyzer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+      - name: PSScriptAnalyzer (fails on Error, lists Warnings)
+        shell: pwsh
+        run: |
+          if (-not (Get-Module -ListAvailable PSScriptAnalyzer)) {
+            Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+          }
+          $all = Invoke-ScriptAnalyzer -Path scripts/windows -Recurse -Severity Error, Warning
+          $all | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize -Wrap
+          # Warnings don't fail the build yet: they haven't been reviewed one by
+          # one. Each gets fixed or excluded with a reason in a later PR, then
+          # this check tightens to Warning.
+          $errors = @($all | Where-Object Severity -eq 'Error')
+          if ($errors.Count -gt 0) { exit 1 }
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  # v5.0.0
+        with:
+          fetch-depth: 0   # scan the whole history, not just the last commit
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
