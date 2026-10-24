@@ -250,9 +250,6 @@ if [ -n "$IDENTITY_SERIAL" ] && [ "$IDENTITY_SERIAL" != "$SERIAL" ]; then
   exit 1
 fi
 
-CPU_MODEL="unknown"
-have lscpu && CPU_MODEL=$(lscpu | awk -F': *' '/Model name/{print $2; exit}')
- 
 # --- RAM -----------------------------------------------------------------------
 log "\n=== RAM ==="
 MEM_DUMP=""
